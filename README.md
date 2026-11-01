@@ -83,3 +83,8 @@ python -m uvicorn video_assistant.api.app:app --reload --host 127.0.0.1 --port 8
 ```
 
 Swagger: http://127.0.0.1:8000/docs · [API 개발 안내](docs/API_DEVELOPMENT.md).
+
+## CI/CD · 배포
+
+`feature/* → develop → main` 순서로 통합하며, main 반영 후 전체 테스트 성공 시 FastAPI Cloud에 배포합니다.
+최초 Cloud 앱·GitHub Secrets 연결과 검토 절차는 [배포 안내](docs/DEPLOYMENT.md)를 참고하세요.

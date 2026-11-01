@@ -11,14 +11,16 @@
 4. 자기 기능은 샘플 입력으로 직접 호출해 테스트합니다. API가 없어도 기능 개발을 진행할 수 있습니다.
 5. API 개발 위치와 실행 방법은 [API 안내](docs/API_DEVELOPMENT.md)를 참고합니다. 현재 서버는 `/health`만 제공하며 기능별 API는 이후 추가합니다.
 
-## 2. 기존 브랜치·검토·병합 규칙
+## 2. 브랜치·검토·병합 규칙
 
-- 최신 `main`에서 `feature/ui`, `feature/transcription`, `feature/analysis`, `feature/recommendation`, `feature/editing` 등 작업 브랜치를 만듭니다.
+- 흐름은 `feature/* → develop → main → FastAPI Cloud`입니다. 기능 PR은 develop으로, 릴리스 PR은 develop에서 main으로 제출합니다.
+- main은 운영 배포 브랜치입니다. main 반영 후 전체 테스트가 성공해야 자동 배포됩니다.
+- 최신 `develop`에서 `feature/ui`, `feature/transcription`, `feature/analysis`, `feature/recommendation`, `feature/editing` 등 작업 브랜치를 만듭니다.
 - 담당 디렉터리와 관련 테스트를 중심으로 작업합니다.
 - 공통 모델·인터페이스·오류·설정·의존성·Fixture 변경은 사전에 공유하고 관련 담당자의 동의를 받습니다.
 - PR 전에 `python -m pytest -q`를 실행하여 회귀를 확인합니다. 기존 영상 관련 테스트에는 FFmpeg/FFprobe가 필요합니다.
-- 팀장·관련 담당자가 PR을 검토하고 GitHub PR을 통해 main에 병합합니다. 파일을 통째로 복사해 덮어쓰지 않습니다.
-- 병합 후 main에서 전체 흐름을 다시 확인합니다.
+- 팀장·관련 담당자가 PR을 검토하고 GitHub PR을 통해 develop에 병합합니다. 파일을 통째로 복사해 덮어쓰지 않습니다.
+- 병합 후 develop에서 전체 흐름을 다시 확인합니다.
 - 구현체 등록을 같은 PR에 포함할지 별도 PR로 나눌지는 기존 문서의 설명이 서로 다르므로, 해당 작업 전에 팀장과 범위를 확인합니다. 이 문서에서 기존 절차를 임의로 변경하지 않습니다.
 
 ## 3. 커밋 메시지 작성
@@ -79,7 +81,7 @@ GitHub 담당자 지정
 
 ## 5. PR 작성
 
-PR은 작업 브랜치의 변경 사항을 검토받고 main에 병합하기 위한 요청이다.
+PR은 작업 브랜치의 변경 사항을 검토받고 develop에 병합하기 위한 요청이다.
 기존 규칙대로 본문에 **변경 파일, 구현 기능, 설정·의존성, 테스트 결과, 공통 계약 변경 유무**를 적는다.
 
 - 제목은 커밋과 같은 `유형: 변경 내용` 형식을 사용한다.
@@ -115,11 +117,11 @@ Refs #번호
 ## 6. 작업 순서 예시
 
 1. `추천 요청·조회 API 구현` Issue를 작성하고 담당자를 지정한다.
-2. 최신 main을 기준으로 기존 이름 규칙에 맞는 `feature/recommendation` 브랜치를 만든다.
+2. 최신 develop을 기준으로 기존 이름 규칙에 맞는 `feature/recommendation` 브랜치를 만든다.
 3. 기능 코드와 API, 관련 테스트를 담당 영역에서 작성한다. 필요 시 Issue에서 작업을 나눈다.
 4. `feat: 추천 요청·조회 API 구현`처럼 변경 목적이 드러나는 메시지로 커밋한다.
 5. 작업 브랜치를 GitHub에 올리고 관련 Issue를 연결한 PR을 작성한다.
-6. 기존 규칙에 따라 팀장·관련 담당자의 검토 후 main에 병합하고 통합 동작을 확인한다.
+6. 기존 규칙에 따라 팀장·관련 담당자의 검토 후 develop에 병합하고 통합 동작을 확인한다.
 
 ## 7. 커밋·PR 제출 전 확인
 
@@ -130,3 +132,5 @@ Refs #번호
 - `.env`, API 키, `.venv/`, `runtime/`, 캐시를 제외했는가?
 
 이 문서는 GitHub의 브랜치 보호, 승인 수, 특정 병합 방식이나 자동 검사를 새로 설정하지 않습니다.
+
+CI/CD 설정과 최초 연결 절차는 [배포 안내](docs/DEPLOYMENT.md)를 참고합니다.
