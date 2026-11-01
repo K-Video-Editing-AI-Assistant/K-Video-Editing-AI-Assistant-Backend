@@ -1,0 +1,27 @@
+.venv/
+.env
+runtime/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.egg-info/
+.DS_Store
+
+# Local IDE and OS state
+.vscode/
+.idea/
+Thumbs.db
+
+# Additional Python caches and coverage
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.log
+
+# Never share API keys or local Streamlit credentials
+.streamlit/secrets.toml
+.env.*
+!.env.example
