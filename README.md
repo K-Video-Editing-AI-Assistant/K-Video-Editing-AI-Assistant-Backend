@@ -71,3 +71,15 @@ python -m pytest -v tests/contract/test_recommender_keyword.py
 **주의:** 원본 업로드에 대한 정리 작업입니다. 사용자별로 작성한 실제 기능 코드가 추후 별도 브랜치에 있다면 이 ZIP으로 덮어쓰지 마세요.
 
 팀장이 추후 동일한 방식으로 공유용 ZIP을 다시 만들려면 `python scripts/build_starter_zip.py`를 실행할 수 있습니다. 이 스크립트는 `.venv`, `.env`, 실행 결과, 캐시를 자동으로 제외합니다.
+
+## FastAPI / Swagger (API 개발 기본 서버)
+
+현재 `GET /health`만 제공합니다. 기능별 API는 이후 담당자가 추가합니다.
+기존 Streamlit·모듈 직접 테스트와 파일·JSON 저장 방식은 유지합니다. DB는 사용하지 않습니다.
+
+```bash
+python -m pip install -e ".[test]"
+python -m uvicorn video_assistant.api.app:app --reload --host 127.0.0.1 --port 8000
+```
+
+Swagger: http://127.0.0.1:8000/docs · [API 개발 안내](docs/API_DEVELOPMENT.md).
