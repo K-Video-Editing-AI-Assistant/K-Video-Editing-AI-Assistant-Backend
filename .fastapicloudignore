@@ -1,6 +1,0 @@
-# Deployment-only exclusions; .gitignore exclusions remain respected.
-.github/
-tests/
-docs/
-scripts/
-examples/
