@@ -1,27 +1,49 @@
+# Python Virtual Environments
 .venv/
+venv/
+env/
+
+# Environment Variables & Secrets
 .env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+
+# Runtime Data
 runtime/
+
+# Python Cache
 __pycache__/
-.pytest_cache/
 *.py[cod]
-*.egg-info/
-.DS_Store
+*.pyo
 
-# Local IDE and OS state
-.vscode/
-.idea/
-Thumbs.db
-
-# Additional Python caches and coverage
+# Testing & Coverage
+.pytest_cache/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage.*
 htmlcov/
+coverage.xml
+.tox/
+
+# Build & Distribution
+*.egg-info/
 dist/
 build/
-*.log
 
-# Never share API keys or local Streamlit credentials
-.streamlit/secrets.toml
-.env.*
-!.env.example
+# IDE & Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs & Temporary Files
+*.log
+*.tmp
+*.bak
+
+# OS Generated Files
+.DS_Store
+Thumbs.db
+desktop.ini
