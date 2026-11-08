@@ -8,14 +8,14 @@
 
 ## 문서 바로가기
 
-| 원하는 작업 | 확인할 문서 |
-|---|---|
-| 처음 설치·실행하기 | **이 README의 [빠른 시작](#1-빠른-시작)** 또는 [START_HERE](docs/START_HERE.md) |
-| 현재 시스템 구조 이해 | [아키텍처](docs/ARCHITECTURE.md) |
-| 내가 구현해야 할 파일과 기능 확인 | [5인 담당자별 작업 가이드](docs/ROLE_GUIDE.md) |
-| 모델 필드와 Output 형식 이해 | [Input/Output 계약서](docs/INPUT_OUTPUT_CONTRACT.md) → [`models.py`](src/core/models.py) |
-| 독립 테스트 / 구현체 등록 / PR | [개발·테스트 가이드](docs/DEVELOPMENT_TESTING.md) |
-| 기존 프로젝트와 무엇이 달라졌는지 | [이관 가이드](docs/MIGRATION.md) |
+| 원하는 작업                       | 확인할 문서                                                                              |
+| --------------------------------- | ---------------------------------------------------------------------------------------- |
+| 처음 설치·실행하기                | **이 README의 [빠른 시작](#1-빠른-시작)** 또는 [START_HERE](docs/START_HERE.md)          |
+| 현재 시스템 구조 이해             | [아키텍처](docs/ARCHITECTURE.md)                                                         |
+| 내가 구현해야 할 파일과 기능 확인 | [5인 담당자별 작업 가이드](docs/ROLE_GUIDE.md)                                           |
+| 모델 필드와 Output 형식 이해      | [Input/Output 계약서](docs/INPUT_OUTPUT_CONTRACT.md) → [`models.py`](src/core/models.py) |
+| 독립 테스트 / 구현체 등록 / PR    | [개발·테스트 가이드](docs/DEVELOPMENT_TESTING.md)                                        |
+| 기존 프로젝트와 무엇이 달라졌는지 | [이관 가이드](docs/MIGRATION.md)                                                         |
 
 ## 1. 빠른 시작
 
@@ -69,18 +69,18 @@ Streamlit 기본 주소는 `http://localhost:8501`입니다. **터미널 하나*
 
 ## 2. 이번 통합본에서 실제로 동작하는 부분
 
-| 영역 | 현 상태 |
-|---|---|
-| 공통 Pydantic 모델·ABC 인터페이스·오류 | 구현·검증 가능 |
-| 여러 원본 영상 프로젝트 등록 및 FFprobe 검증 | 구현 |
-| Whisper 자막 인터페이스 / 실제 음성 인식 | **Stub 구현 / 실제 Whisper 미구현** |
-| AI 전처리·내용 분석·키워드·추천 | **Stub 구현 / 실제 LLM 미구현** |
-| 자동 파일 저장 | 원본 MP4, 자막 JSON/SRT, 분석 JSON, 추천·계획·출력 |
-| 편집 계획 생성·수정·승인·버전 검증 | 구현 |
-| 영상 출력 | Stub은 원본 복사 / `ffmpeg` 선택 시 실제 다중 영상 컷 편집 |
-| 장시간 작업 | 한 프로세스의 내부 작업자, JSON 상태 저장 |
-| Streamlit UI | 기본 기능 연결 검증용 화면 |
-| 최종 UI 시안 및 고급 편집 기능 | **미구현(향후 담당자 작업)** |
+| 영역                                         | 현 상태                                                    |
+| -------------------------------------------- | ---------------------------------------------------------- |
+| 공통 Pydantic 모델·ABC 인터페이스·오류       | 구현·검증 가능                                             |
+| 여러 원본 영상 프로젝트 등록 및 FFprobe 검증 | 구현                                                       |
+| Whisper 자막 인터페이스 / 실제 음성 인식     | **Stub 구현 / 실제 Whisper 미구현**                        |
+| AI 전처리·내용 분석·키워드·추천              | **Stub 구현 / 실제 LLM 미구현**                            |
+| 자동 파일 저장                               | 원본 MP4, 자막 JSON/SRT, 분석 JSON, 추천·계획·출력         |
+| 편집 계획 생성·수정·승인·버전 검증           | 구현                                                       |
+| 영상 출력                                    | Stub은 원본 복사 / `ffmpeg` 선택 시 실제 다중 영상 컷 편집 |
+| 장시간 작업                                  | 한 프로세스의 내부 작업자, JSON 상태 저장                  |
+| Streamlit UI                                 | 기본 기능 연결 검증용 화면                                 |
+| 최종 UI 시안 및 고급 편집 기능               | **미구현(향후 담당자 작업)**                               |
 
 이 프로젝트는 팀원들이 바로 구현을 시작할 수 있는 **통합 개발 출발점**이지 완성된 AI 서비스가 아닙니다.
 
@@ -152,7 +152,7 @@ from bootstrap import create_application
      |
      v
 [ApplicationService] -- 프로젝트 등록/저장
-     | 
+     |
      |-- (영상처리) VideoAsset -> Transcriber -> Transcript
      |-- (AI)       Transcript -> ProcessedTranscript
      |-- (AI)       ProcessedTranscript -> VideoAnalysis
@@ -197,14 +197,13 @@ EDITOR_BACKEND=stub
 
 Application 담당은 `application/`의 Python 서비스·워크플로·계획·저장·작업 관리를 맡으며, 별도 HTTP 서버를 구축하지 않습니다.
 
-
-| 담당 | 어디부터 볼까? | 가장 먼저 할 일 |
-|---|---|---|
-| **PM** | [`core/`](src/core/models.py), [계약서](docs/INPUT_OUTPUT_CONTRACT.md) | 역할별 데이터 필드·ID·시간·승인 규칙 검토 |
-| **UI** | [`ui/app.py`](src/ui/app.py) | 서비스 메서드를 호출하는 기본 화면 실행 확인 |
-| **AI 영상분석** | [`ai/stub.py`](src/ai/stub.py), [`ai/`](src/ai/analyzer.py) | 공통 Fixture로 `preprocess/analyze/recommend` 독립 테스트 |
-| **영상처리** | [`processing/`](src/processing/whisper.py) | MP4 메타데이터·Whisper 출력·FFmpeg 편집 독립 테스트 |
-| **Application 담당** | [`application/service.py`](src/application/service.py) | Stub으로 전체 실행 순서·결과 저장·계획 승인 검증 |
+| 담당                 | 어디부터 볼까?                                                         | 가장 먼저 할 일                                           |
+| -------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------- |
+| **PM**               | [`core/`](src/core/models.py), [계약서](docs/INPUT_OUTPUT_CONTRACT.md) | 역할별 데이터 필드·ID·시간·승인 규칙 검토                 |
+| **UI**               | [`ui/app.py`](src/ui/app.py)                                           | 서비스 메서드를 호출하는 기본 화면 실행 확인              |
+| **AI 영상분석**      | [`ai/stub.py`](src/ai/stub.py), [`ai/`](src/ai/analyzer.py)            | 공통 Fixture로 `preprocess/analyze/recommend` 독립 테스트 |
+| **영상처리**         | [`processing/`](src/processing/whisper.py)                             | MP4 메타데이터·Whisper 출력·FFmpeg 편집 독립 테스트       |
+| **Application 담당** | [`application/service.py`](src/application/service.py)                 | Stub으로 전체 실행 순서·결과 저장·계획 승인 검증          |
 
 **협업 원칙:** 각자 독립 개발 → Fixture/Stub 독립 테스트 → 완성 후 자기 브랜치에서 구현체 등록 → 전체 흐름 테스트 → PR 제출. 팀장이 등록할 때까지 기다릴 필요가 없습니다. [자세한 설명](docs/ROLE_GUIDE.md)
 
