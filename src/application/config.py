@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, field_validator
 
 
 # src/application/config.py -> parents[2] points at the project root.
@@ -21,6 +21,14 @@ class Settings(BaseModel):
     project_analyzer_backend: str = "stub"
     recommender_backend: str = "stub"
     editor_backend: str = "stub"
+    cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://localhost:3000")
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value):
+        if isinstance(value, str):
+            return tuple(origin.strip() for origin in value.split(",") if origin.strip())
+        return value
 
     @classmethod
     def from_env(cls) -> "Settings":
