@@ -1,48 +1,39 @@
-"""Print an exact, deterministic example of how contract objects refer to each other.
-
-Run from the repository root after an editable install:
-    python scripts/show_contract_chain.py
-"""
-
+"""Print complete shared Pydantic JSON objects and their reference relationships."""
 from pathlib import Path
 import sys
 
+# Run from a fresh checkout even before editable package installation.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from tempfile import TemporaryDirectory
+
+from application.config import Settings
+from bootstrap import create_application
+from core.models import SearchRequest, new_id
+
+
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "src"))
-
-from tests.fixtures.contract_samples import (
-    sample_analysis, sample_approved_plan, sample_draft,
-    sample_recommendation, sample_request, sample_transcript, sample_video,
-)
 
 
-def main() -> None:
-    video = sample_video()
-    transcript = sample_transcript(video)
-    analysis = sample_analysis(transcript)
-    request = sample_request(video)
-    recommendation = sample_recommendation(request, transcript, analysis)
-    draft = sample_draft(recommendation)
-    approved = sample_approved_plan(recommendation)
-
-    print("1. VideoAsset", video.id, f"({video.duration_ms}ms)")
-    print("2. Transcript", transcript.id, "-> video_id", transcript.video_id)
-    print("3. VideoAnalysis", analysis.id, "-> transcript_id", analysis.transcript_id)
-    print("4. SearchRequest", request.id, "-> video_id", request.video_id)
-    print("5. RecommendationResult", recommendation.id, "-> analysis_id", recommendation.analysis_id)
-    print("   clips:")
-    for clip in recommendation.clips:
-        print(f"   - {clip.start_ms}~{clip.end_ms}ms", clip.source_segment_ids, clip.reason)
-    print("6. EditPlan", draft.id, "-> recommendation_id", draft.recommendation_id)
-    print("7. ApprovedEditPlan", approved.id, "-> status", approved.status.value)
-    assert video.id == transcript.video_id == analysis.video_id == recommendation.video_id
-    assert transcript.id == analysis.transcript_id == recommendation.transcript_id
-    assert recommendation.id == draft.recommendation_id
-    assert approved.clips == draft.clips
-    print("PASS: linked IDs, clip ordering and Pydantic contracts are consistent")
-    print("(These are fixture objects only; this script does not perform AI or rendering.)")
-
-
-if __name__ == "__main__":
-    main()
+with TemporaryDirectory(prefix="clipnote-contract-") as folder:
+    app = create_application(Settings(runtime_dir=Path(folder)))
+    try:
+        project = app.create_project("계약 JSON 예제")
+        asset = app.add_video(project.id, "demo.mp4", (ROOT / "examples" / "demo.mp4").read_bytes())
+        transcript_analysis = app.prepare_project(project.id)
+        request = SearchRequest(id=new_id(), project_id=project.id,
+                                video_ids=(asset.id,), query="AI 관련 내용")
+        result = app.recommend(request)
+        plan = app.create_plan(project.id, result.id)
+        print("\n[Transcript]")
+        print(app.get_transcript(project.id, asset.id).model_dump_json(indent=2))
+        print("\n[ProjectAnalysis]")
+        print(transcript_analysis.model_dump_json(indent=2))
+        print("\n[RecommendationResult]")
+        print(result.model_dump_json(indent=2))
+        print("\n[EditPlan]")
+        print(plan.model_dump_json(indent=2))
+        print("\n[ID references]")
+        print("recommendation.request_id == request.id:", result.request_id == request.id)
+        print("editplan.recommendation_id == result.id:", plan.recommendation_id == result.id)
+    finally:
+        app.close()

@@ -1,0 +1,1 @@
+"""CLIPNOTE application package."""
