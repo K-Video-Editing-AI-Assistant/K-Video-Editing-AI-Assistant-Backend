@@ -14,7 +14,7 @@ from core.models import SearchRequest, new_id
 ROOT = Path(__file__).resolve().parents[1]
 
 
-with TemporaryDirectory(prefix="clipnote-contract-") as folder:
+with TemporaryDirectory(prefix="ai-video-assistant-contract-") as folder:
     app = create_application(Settings(runtime_dir=Path(folder)))
     try:
         project = app.create_project("계약 JSON 예제")

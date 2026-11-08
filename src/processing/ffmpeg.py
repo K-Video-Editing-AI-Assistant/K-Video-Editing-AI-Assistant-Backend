@@ -26,7 +26,7 @@ class FFmpegVideoEditor(VideoEditor):
         if not plan.clips or any(clip.video_id not in by_id for clip in plan.clips):
             raise AppError(ErrorCode.INVALID_PLAN, "편집 계획의 원본 영상이 없습니다.")
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.TemporaryDirectory(prefix="clipnote-render-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="ai-video-assistant-render-") as tmp:
             folder = Path(tmp)
             pieces = []
             for index, clip in enumerate(plan.clips):

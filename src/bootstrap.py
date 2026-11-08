@@ -3,7 +3,7 @@
 Step 1: Implement and test a module independently with shared fixtures.
 Step 2: Add its factory to the corresponding registry below.
 Step 3: Select the registry key in .env and run the full Stub/Real workflow.
-No FastAPI or external HTTP server is required.
+The FastAPI entry point and the legacy Streamlit test UI reuse this factory.
 """
 
 from ai.stub import (
@@ -35,7 +35,7 @@ def _make(registry: dict, selected: str, kind: str):
 
 
 def create_application(settings: Settings | None = None) -> ApplicationService:
-    """Create the single ApplicationService used by Streamlit and tests."""
+    """Create the ApplicationService used by FastAPI, the test UI and tests."""
     settings = settings or Settings.from_env()
     return ApplicationService(
         store=ProjectStore(settings.runtime_dir),
