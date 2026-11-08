@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<10"]
+test = ["pytest>=8,<10", "httpx>=0.27,<1"]
 
 [tool.setuptools]
 # bootstrap.py lives directly in src/, outside the five packages.
