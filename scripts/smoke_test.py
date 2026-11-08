@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    with TemporaryDirectory(prefix="clipnote-smoke-") as folder:
+    with TemporaryDirectory(prefix="ai-video-assistant-smoke-") as folder:
         app = create_application(Settings(runtime_dir=Path(folder)))
         try:
             project = app.create_project("다중 영상 통합 테스트")

@@ -1,4 +1,4 @@
-# CLIPNOTE — AI 영상편집 어시스턴트
+# AI 영상편집 어시스턴트
 
 > **현재 개발 방향: React 프론트엔드 + FastAPI 백엔드.** 아래 Streamlit 직접 호출 설명은 기존 테스트용 구조입니다.
 
@@ -87,7 +87,7 @@ Streamlit 기본 주소는 `http://localhost:8501`입니다. **터미널 하나*
 ## 3. 프로젝트 폴더 구조
 
 ```text
-CLIPNOTE_application_role_v1_2/
+AI 영상편집 어시스턴트/
 ├── README.md
 ├── pyproject.toml
 ├── .env.example
@@ -130,7 +130,7 @@ CLIPNOTE_application_role_v1_2/
 └── runtime/                   # 실행 시 자동 생성 (Git 제외)
 ```
 
-소스 코드는 `src/` 바로 아래의 `core`, `application`, `ui`, `ai`, `processing` 패키지로 구성합니다. `bootstrap.py`는 `src/` 최상위 모듈입니다. 서비스 이름은 **CLIPNOTE**입니다. 기존 `video_assistant.*` Import는 더 이상 사용하지 않습니다.
+소스 코드는 `src/` 바로 아래의 `core`, `application`, `ui`, `ai`, `processing` 패키지로 구성합니다. `bootstrap.py`는 `src/` 최상위 모듈입니다. 서비스 이름은 **AI 영상편집 어시스턴트**입니다. 기존 `video_assistant.*` Import는 더 이상 사용하지 않습니다.
 
 ### Import 변경 안내
 

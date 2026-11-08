@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "clipnote-video-assistant"
+name = "ai-video-assistant"
 version = "1.2.0"
-description = "CLIPNOTE multi-video single-process Python application skeleton"
+description = "AI 영상편집 어시스턴트 multi-video single-process Python application skeleton"
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115,<1",

@@ -1,4 +1,4 @@
-"""CLIPNOTE 기능 모듈이 공통으로 사용하는 애플리케이션 오류 계약.
+"""AI 영상편집 어시스턴트 기능 모듈이 공통으로 사용하는 애플리케이션 오류 계약.
 
 Pydantic 필드 오류는 ValidationError, 업무 규칙·외부 처리 오류는 AppError로 구분합니다.
 예: 잘못된 편집 계획은 INVALID_PLAN, 실제 FFmpeg 실패는 RENDER_FAILED입니다.

@@ -1,6 +1,6 @@
 """UI 담당자: minimal working Streamlit proof of the shared application contract.
 
-This is a functional development screen, NOT the final CLIPNOTE design mockup.
+This is a functional development screen, NOT the final AI 영상편집 어시스턴트 design mockup.
 It calls only ApplicationService methods, never Whisper/LLM/FFmpeg directly.
 """
 
@@ -12,8 +12,8 @@ from core.models import (
     EditMode, JobState, PlanClip, PlanStatus, SearchRequest, SubtitleStyle, new_id,
 )
 
-st.set_page_config(page_title="CLIPNOTE 개발 스켈레톤", layout="wide")
-st.title("CLIPNOTE · 기능 연결 확인")
+st.set_page_config(page_title="AI 영상편집 어시스턴트 개발 스켈레톤", layout="wide")
+st.title("AI 영상편집 어시스턴트 · 기능 연결 확인")
 st.caption("5인 역할 기반 단일 Python 앱 · 현재 UI는 최종 디자인이 아닌 개발 검증용입니다.")
 st.info("기본 모드는 모두 Stub입니다. 자막/AI 결과는 테스트 데이터이며 Stub 편집기는 첫 영상을 복사합니다.")
 
@@ -50,7 +50,7 @@ if st.button("작업 상태 새로고침"):
 st.subheader("1 · 프로젝트와 원본 영상")
 if not st.session_state.project_id and st.button("새 프로젝트 만들기"):
     try:
-        project = app.create_project("CLIPNOTE 편집 프로젝트")
+        project = app.create_project("AI 영상편집 어시스턴트 편집 프로젝트")
         st.session_state.project_id = project.id
         st.rerun()
     except Exception as exc:
@@ -205,6 +205,6 @@ if project and render_job and render_job.state == JobState.SUCCEEDED:
             st.caption("FFmpeg 기본 컷 편집 결과입니다. 자막 합성은 아직 지원하지 않습니다.")
         st.video(str(result.output_path))
         st.download_button("결과 다운로드", result.output_path.read_bytes(),
-                           file_name="clipnote_result.mp4", mime="video/mp4")
+                           file_name="ai-video-assistant_result.mp4", mime="video/mp4")
     except Exception as exc:
         st.error(f"결과 조회 실패: {exc}")

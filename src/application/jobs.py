@@ -61,7 +61,7 @@ class JobStore:
 class JobScheduler:
     def __init__(self, store: JobStore):
         self.store = store
-        self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="clipnote-job")
+        self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ai-video-assistant-job")
         self.lock = RLock()
         self.futures: dict[str, Future] = {}
 
