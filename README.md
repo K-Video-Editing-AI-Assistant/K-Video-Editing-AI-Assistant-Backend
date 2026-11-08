@@ -1,5 +1,6 @@
 # CLIPNOTE — AI 영상편집 어시스턴트
 
+> **현재 개발 방향: React 프론트엔드 + FastAPI 백엔드.** 아래 Streamlit 직접 호출 설명은 기존 테스트용 구조입니다.
 
 > **별도 HTTP 서버(FastAPI 등)를 사용하지 않습니다.** Streamlit 화면에서 같은 Python 프로세스의 `ApplicationService`를 직접 호출합니다. 이 서비스 계층을 맡는 팀원의 공식 역할명은 **Application 담당**입니다.
 
