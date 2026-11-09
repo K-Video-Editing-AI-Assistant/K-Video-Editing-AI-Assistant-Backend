@@ -13,7 +13,11 @@ def test_health_and_service_lifecycle(tmp_path):
         service = app.state.application_service
         response = client.get("/api/v1/health")
         assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
+        assert response.json() == {
+            "success": True,
+            "data": {"status": "ok"},
+            "error": None,
+        }
         assert app.state.application_service is service
         assert client.get("/openapi.json").json()["paths"]["/api/v1/health"]
     assert not hasattr(app.state, "application_service")

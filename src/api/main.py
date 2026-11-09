@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from api.exception_handlers import handle_app_error, handle_request_validation_error
+from api.responses import ApiResponse
 from application.config import Settings
 from bootstrap import create_application
 from core.errors import AppError
@@ -41,8 +42,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["Content-Type", "Authorization"],
     )
 
-    @app.get("/api/v1/health", response_model=HealthResponse, tags=["health"])
-    def health() -> HealthResponse:
-        return HealthResponse()
+    @app.get("/api/v1/health", tags=["health"])
+    def health() -> ApiResponse[HealthResponse]:
+        return ApiResponse[HealthResponse].ok(HealthResponse())
 
     return app
