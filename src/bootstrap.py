@@ -16,9 +16,10 @@ from application.storage import ProjectStore
 from core.errors import AppError, ErrorCode
 from processing.ffmpeg import FFmpegVideoEditor
 from processing.stub import StubTranscriber, StubVideoEditor
+from processing.whisper import WhisperTranscriber
 
 # After developing a real implementation, import it here and add a key.
-TRANSCRIBERS = {"stub": StubTranscriber}
+TRANSCRIBERS = {"stub": StubTranscriber, "whisper": WhisperTranscriber}
 PREPROCESSORS = {"stub": StubPreprocessor}
 ANALYZERS = {"stub": StubContentAnalyzer}
 PROJECT_ANALYZERS = {"stub": StubProjectAnalyzer}
