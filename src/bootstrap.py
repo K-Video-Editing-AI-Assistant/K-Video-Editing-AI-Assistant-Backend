@@ -17,11 +17,22 @@ from core.errors import AppError, ErrorCode
 from processing.ffmpeg import FFmpegVideoEditor
 from processing.stub import StubTranscriber, StubVideoEditor
 from processing.whisper import WhisperTranscriber
+from ai.analyzer import LLMContentAnalyzer
+from ai.preprocessing import AITranscriptPreprocessor
 
 # After developing a real implementation, import it here and add a key.
-TRANSCRIBERS = {"stub": StubTranscriber, "whisper": WhisperTranscriber}
-PREPROCESSORS = {"stub": StubPreprocessor}
-ANALYZERS = {"stub": StubContentAnalyzer}
+TRANSCRIBERS = {
+    "stub": StubTranscriber, 
+    "whisper": WhisperTranscriber
+}
+PREPROCESSORS = {
+    "stub": StubPreprocessor,
+    "ai": AITranscriptPreprocessor,
+}
+ANALYZERS = {
+    "stub": StubContentAnalyzer,
+    "llm": LLMContentAnalyzer,
+}
 PROJECT_ANALYZERS = {"stub": StubProjectAnalyzer}
 RECOMMENDERS = {"stub": StubSegmentRecommender}
 EDITORS = {"stub": StubVideoEditor, "ffmpeg": FFmpegVideoEditor}

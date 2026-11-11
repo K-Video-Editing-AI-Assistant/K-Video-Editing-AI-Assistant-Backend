@@ -122,3 +122,20 @@ def test_real_demo_video():
     result = WhisperTranscriber(model_size="tiny").transcribe(video)
     for segment in result.segments:
         assert 0 <= segment.start_ms < segment.end_ms <= duration_ms
+
+def test_segment_progress_is_logged(tmp_path, monkeypatch, caplog):
+    import logging
+    from types import SimpleNamespace
+
+    transcriber = WhisperTranscriber(model_size="tiny")
+    model = SimpleNamespace(transcribe=lambda *args, **kwargs: (
+        iter([SimpleNamespace(start=0.0, end=1.5, text="test speech")]), None,
+    ))
+    monkeypatch.setattr(transcriber, "_load_model", lambda: model)
+    with caplog.at_level(logging.INFO, logger="processing.whisper"):
+        result = transcriber._run_model(write_wav(tmp_path / "audio.wav", b"\x00\x40" * 16000))
+    assert result == [(0.0, 1.5, "test speech")]
+    assert "Whisper 모델 로드 완료" in caplog.text
+    assert "자막 인식 중: 0.0~1.5초" in caplog.text
+    assert "자막 인식 완료" in caplog.text
+    assert "test speech" not in caplog.text

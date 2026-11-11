@@ -392,6 +392,7 @@ class JobStatus(ContractModel):
     kind: JobKind
     state: JobState = JobState.QUEUED
     progress: int = Field(default=0, ge=0, le=100, strict=True, description="진행률(0~100)")
+    stage: str | None = Field(default=None, description="처리 단계: transcribing/preprocessing/analyzing/completed")
     result_ref: str | None = Field(default=None, description="성공한 결과 객체의 ID")
     error_message: str | None = Field(default=None, description="실패 사유(사용자 표시용)")
     created_at: datetime = Field(default_factory=utc_now)

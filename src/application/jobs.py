@@ -5,6 +5,7 @@ not automatically resumed. Suitable for one developer process, not multi-worker 
 """
 
 import os
+from contextvars import ContextVar
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from threading import RLock
@@ -64,32 +65,46 @@ class JobScheduler:
         self.worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ai-video-assistant-job")
         self.lock = RLock()
         self.futures: dict[str, Future] = {}
+        self.current_job = ContextVar("current_job", default=None)
 
-    def submit(self, kind: JobKind, project_id: str, func: Callable[[], str]) -> JobStatus:
-        status = JobStatus(id=new_id(), project_id=project_id, kind=kind)
+    def submit(self, kind: JobKind, project_id: str, func: Callable[[], str], *, video_id: str | None = None) -> JobStatus:
+        status = JobStatus(id=new_id(), project_id=project_id, kind=kind, video_id=video_id)
         self.store.save(status)
 
         def task() -> None:
             self.store.save(JobStatus.model_validate({
-                **status.model_dump(), "state": JobState.RUNNING, "progress": 10,
+                **status.model_dump(), "state": JobState.RUNNING,
                 "updated_at": utc_now(),
             }))
+            token = self.current_job.set(status.id)
             try:
                 result_id = func()
                 finished = JobStatus.model_validate({
-                    **status.model_dump(), "state": JobState.SUCCEEDED,
+                    **self.store.load(status.id).model_dump(), "state": JobState.SUCCEEDED,
+                    "stage": "completed",
                     "progress": 100, "result_ref": result_id, "updated_at": utc_now(),
                 })
             except Exception as exc:
                 finished = JobStatus.model_validate({
-                    **status.model_dump(), "state": JobState.FAILED,
+                    **self.store.load(status.id).model_dump(), "state": JobState.FAILED,
                     "error_message": str(exc), "updated_at": utc_now(),
                 })
+            finally:
+                self.current_job.reset(token)
             self.store.save(finished)
 
         with self.lock:
             self.futures[status.id] = self.worker.submit(task)
         return status
+
+    def report_stage(self, stage: str) -> None:
+        """현재 작업의 단계를 파일에 저장합니다. 동기 실행에서는 기록하지 않습니다."""
+        job_id = self.current_job.get()
+        if job_id is not None:
+            current = self.store.load(job_id)
+            self.store.save(JobStatus.model_validate({
+                **current.model_dump(), "stage": stage, "updated_at": utc_now(),
+            }))
 
     def get(self, job_id: str) -> JobStatus:
         return self.store.load(job_id)

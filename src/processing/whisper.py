@@ -18,6 +18,11 @@
 from __future__ import annotations
 
 import os
+import platform
+import logging
+from time import perf_counter
+
+from dotenv import dotenv_values
 import subprocess
 import tempfile
 import threading
@@ -31,6 +36,9 @@ from core.models import Transcript, TranscriptSegment, VideoAsset, new_id
 
 if TYPE_CHECKING:  
     import numpy as np
+
+
+logger = logging.getLogger(__name__)
 
 
 RawSegment = tuple[float, float, str]
@@ -53,10 +61,27 @@ class WhisperTranscriber(Transcriber):
         beam_size: int = 5,
         vad_filter: bool = True,
     ) -> None:
-        self.model_size = model_size or os.getenv("WHISPER_MODEL", "small")
-        self.device = device or os.getenv("WHISPER_DEVICE", "cpu")
-        self.compute_type = compute_type or os.getenv("WHISPER_COMPUTE_TYPE", "int8")
-        self.language = language or os.getenv("WHISPER_LANGUAGE", "ko")
+        values = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
+        def setting(name, default):
+            return os.environ.get(name) or values.get(name) or default
+
+        self.model_size = model_size or setting("WHISPER_MODEL", "small")
+        requested_device = device or setting("WHISPER_DEVICE", "auto")
+        self.device = requested_device
+        if requested_device == "auto":
+            self.device = "cpu"
+            if platform.system() == "Darwin" and platform.machine().lower() in ("arm64", "aarch64"):
+                try:
+                    import ctranslate2
+                    if ctranslate2.get_supported_compute_types("mps"):
+                        self.device = "mps"
+                except (ImportError, ValueError, RuntimeError):
+                    logging.getLogger(__name__).warning("MPS를 사용할 수 없어 CPU를 사용합니다.")
+        requested_compute = compute_type or setting("WHISPER_COMPUTE_TYPE", "auto")
+        self.compute_type = requested_compute
+        if requested_compute == "auto":
+            self.compute_type = "int8" if self.device == "cpu" else "float32" if self.device == "mps" else "float16"
+        self.language = language or setting("WHISPER_LANGUAGE", "ko")
         self.beam_size = beam_size
         self.vad_filter = vad_filter
         self.VERSION = (
@@ -74,7 +99,9 @@ class WhisperTranscriber(Transcriber):
 
         with tempfile.TemporaryDirectory(prefix="clipnote-whisper-") as tmp:
             wav = Path(tmp) / "audio.wav"
+            logger.info("오디오 추출 시작 — 영상 %.1f초", video.duration_ms / 1000)
             self._extract_audio(source, wav, video.duration_ms)
+            logger.info("오디오 추출 완료")
             raw = self._run_model(wav)
 
         return self._build(video, self._to_segments(raw, video.duration_ms))
@@ -145,13 +172,26 @@ class WhisperTranscriber(Transcriber):
         audio = self._load_wav(wav)
         if audio.size == 0:
             return []
+        started = perf_counter()
+        logger.info("Whisper 모델 로드 시작 — %s / %s / %s", self.model_size, self.device, self.compute_type)
         model = self._load_model()
+        logger.info("Whisper 모델 로드 완료 — %.1f초", perf_counter() - started)
+        started = perf_counter()
+        logger.info("자막 인식 시작 — 첫 구간이 생성될 때까지 출력이 없을 수 있습니다")
         try:
             segments, _info = model.transcribe(
                 audio, language=self.language, beam_size=self.beam_size,
                 vad_filter=self.vad_filter,
             )
-            return [(seg.start, seg.end, seg.text) for seg in segments]
+            result = []
+            for seg in segments:
+                result.append((seg.start, seg.end, seg.text))
+                logger.info(
+                    "자막 인식 중: %.1f~%.1f초 — %d개 구간, 경과 %.1f초",
+                    seg.start, seg.end, len(result), perf_counter() - started,
+                )
+            logger.info("자막 인식 완료 — %d개 구간, %.1f초", len(result), perf_counter() - started)
+            return result
         except Exception as exc:
             raise AppError(
                 ErrorCode.TRANSCRIPTION_FAILED, f"음성 인식 실패: {exc}", retryable=True
