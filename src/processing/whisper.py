@@ -18,6 +18,10 @@
 from __future__ import annotations
 
 import os
+import platform
+import logging
+
+from dotenv import dotenv_values
 import subprocess
 import tempfile
 import threading
@@ -53,10 +57,27 @@ class WhisperTranscriber(Transcriber):
         beam_size: int = 5,
         vad_filter: bool = True,
     ) -> None:
-        self.model_size = model_size or os.getenv("WHISPER_MODEL", "small")
-        self.device = device or os.getenv("WHISPER_DEVICE", "cpu")
-        self.compute_type = compute_type or os.getenv("WHISPER_COMPUTE_TYPE", "int8")
-        self.language = language or os.getenv("WHISPER_LANGUAGE", "ko")
+        values = dotenv_values(Path(__file__).resolve().parents[2] / ".env")
+        def setting(name, default):
+            return os.environ.get(name) or values.get(name) or default
+
+        self.model_size = model_size or setting("WHISPER_MODEL", "small")
+        requested_device = device or setting("WHISPER_DEVICE", "auto")
+        self.device = requested_device
+        if requested_device == "auto":
+            self.device = "cpu"
+            if platform.system() == "Darwin" and platform.machine().lower() in ("arm64", "aarch64"):
+                try:
+                    import ctranslate2
+                    if ctranslate2.get_supported_compute_types("mps"):
+                        self.device = "mps"
+                except (ImportError, ValueError, RuntimeError):
+                    logging.getLogger(__name__).warning("MPS를 사용할 수 없어 CPU를 사용합니다.")
+        requested_compute = compute_type or setting("WHISPER_COMPUTE_TYPE", "auto")
+        self.compute_type = requested_compute
+        if requested_compute == "auto":
+            self.compute_type = "int8" if self.device == "cpu" else "float32" if self.device == "mps" else "float16"
+        self.language = language or setting("WHISPER_LANGUAGE", "ko")
         self.beam_size = beam_size
         self.vad_filter = vad_filter
         self.VERSION = (
