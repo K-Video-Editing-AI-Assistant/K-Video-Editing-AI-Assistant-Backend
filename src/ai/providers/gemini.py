@@ -5,12 +5,17 @@
 """
 
 import json
+import logging
+from time import perf_counter
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from core.errors import AppError, ErrorCode
 from core.models import ProcessedSegment
+
+
+logger = logging.getLogger(__name__)
 
 
 class GeminiProcessingError(RuntimeError):
@@ -162,9 +167,36 @@ class GeminiTranscriptRefiner:
 
     def refine(self, segments: tuple[ProcessedSegment, ...]) -> tuple[str, ...]:
         """하나라도 실패하면 예외를 발생시켜 전체 규칙 기반 결과로 되돌립니다."""
+        batches = tuple(self._batches(segments))
+        started = perf_counter()
+        logger.info(
+            "Gemini 자막 교정 시작 — 자막 %d개, 배치 %d개, 동시 요청 수 1",
+            len(segments), len(batches),
+        )
         output: list[str] = []
-        for batch in self._batches(segments):
-            output.extend(self._refine_batch(batch))
+        for index, batch in enumerate(batches, start=1):
+            batch_started = perf_counter()
+            logger.info(
+                "Gemini 자막 교정 배치 %d/%d 시작 — 자막 %d개, 텍스트 %d자",
+                index, len(batches), len(batch), sum(len(item.text) for item in batch),
+            )
+            try:
+                output.extend(self._refine_batch(batch))
+            except GeminiProcessingError:
+                logger.warning(
+                    "Gemini 자막 교정 배치 %d/%d 실패 — 배치 %.1f초, 전체 경과 %.1f초",
+                    index, len(batches), perf_counter() - batch_started,
+                    perf_counter() - started,
+                )
+                raise
+            logger.info(
+                "Gemini 자막 교정 배치 %d/%d 완료 — %.1f초 (응답 검증 포함)",
+                index, len(batches), perf_counter() - batch_started,
+            )
+        logger.info(
+            "Gemini 자막 교정 전체 완료 — 배치 %d개, 전체 %.1f초",
+            len(batches), perf_counter() - started,
+        )
         return tuple(output)
 
 
