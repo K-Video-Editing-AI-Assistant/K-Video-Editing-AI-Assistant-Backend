@@ -79,6 +79,7 @@ class ApplicationService:
     def prepare_video(self, project_id: str, video_id: str) -> VideoAnalysis:
         """영상 1개의 자막 추출·전처리·요약 및 주제 분석 결과를 저장하고 반환합니다."""
         video = self.get_video(project_id, video_id)
+        self.scheduler.report_stage("transcribing")
         try:
             transcript = self.store.video_data(project_id, video.id, "transcript")
             if transcript.transcriber_version != self.transcriber.VERSION:
@@ -92,6 +93,7 @@ class ApplicationService:
             write_srt(transcript, self.store.video_dir(project_id, video.id) / "transcript.srt")
         self._validate_transcript(video, transcript)
 
+        self.scheduler.report_stage("preprocessing")
         try:
             processed = self.store.video_data(project_id, video.id, "processed")
             if processed.source_transcript_id != transcript.id or processed.preprocessing_version != self.preprocessor.VERSION:
@@ -104,6 +106,7 @@ class ApplicationService:
             self.store.save_video_data(project_id, video.id, "processed", processed)
         self._validate_processed(transcript, processed)
 
+        self.scheduler.report_stage("analyzing")
         try:
             analysis = self.store.video_data(project_id, video.id, "analysis")
             if (analysis.transcript_id != transcript.id
@@ -291,6 +294,14 @@ class ApplicationService:
 
     def get_render_result(self, project_id: str) -> RenderResult:
         return self.store.render(project_id)
+
+    def submit_prepare_video(self, project_id: str, video_id: str) -> JobStatus:
+        self._require_video(project_id, video_id)
+        return self.scheduler.submit(
+            JobKind.PREPARE, project_id,
+            lambda: self.prepare_video(project_id, video_id).id,
+            video_id=video_id,
+        )
 
     def submit_prepare(self, project_id: str) -> JobStatus:
         return self.scheduler.submit(JobKind.PREPARE, project_id, lambda: self.prepare_project(project_id).id)
