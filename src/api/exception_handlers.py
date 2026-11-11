@@ -6,6 +6,8 @@ from http import HTTPStatus
 from fastapi import Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.exception_handlers import http_exception_handler
+from starlette.exceptions import HTTPException
 
 from api.responses import ApiResponse
 from core.errors import AppError, ErrorCode
@@ -14,6 +16,8 @@ from core.errors import AppError, ErrorCode
 logger = logging.getLogger(__name__)
 
 APP_ERROR_STATUS = {
+    ErrorCode.UPLOAD_TOO_LARGE: 413,
+    ErrorCode.UNSUPPORTED_FILE_TYPE: 415,
     ErrorCode.INVALID_INPUT: status.HTTP_400_BAD_REQUEST,
     ErrorCode.INVALID_REFERENCE: status.HTTP_400_BAD_REQUEST,
     ErrorCode.INVALID_PLAN: status.HTTP_400_BAD_REQUEST,
@@ -29,9 +33,16 @@ async def handle_request_validation_error(
         ErrorCode.INVALID_INPUT.value, "요청 값이 올바르지 않습니다.",
     )
     return JSONResponse(
-        status_code=HTTPStatus.UNPROCESSABLE_ENTITY,
+        status_code=400 if _request.url.path == "/api/videos" and _request.method == "POST" else HTTPStatus.UNPROCESSABLE_ENTITY,
         content=response.model_dump(mode="json"),
     )
+
+
+async def handle_http_error(request: Request, exc: HTTPException):
+    if request.url.path == "/api/videos" and request.method == "POST":
+        response = ApiResponse[None].fail(ErrorCode.INVALID_INPUT.value, "업로드 요청이 올바르지 않습니다.")
+        return JSONResponse(status_code=exc.status_code, content=response.model_dump(mode="json"))
+    return await http_exception_handler(request, exc)
 
 
 async def handle_app_error(_request: Request, exc: AppError) -> JSONResponse:
