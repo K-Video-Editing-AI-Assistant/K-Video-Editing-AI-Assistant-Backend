@@ -17,7 +17,7 @@ def segment():
 
 
 def response():
-    return SimpleNamespace(text=json.dumps({'segments': [{'id': 's', 'text': '원문'}]}))
+    return SimpleNamespace(text=json.dumps({'segments': [{'id': '0', 'text': '원문'}]}))
 
 
 def api_error(code):

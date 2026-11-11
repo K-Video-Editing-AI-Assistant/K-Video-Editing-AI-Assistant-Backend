@@ -61,7 +61,7 @@ class LLMContentAnalyzer(ContentAnalyzer):
     """Gemini 기본 / 규칙 기반 폴백 방식의 영상별 주제 분석."""
 
     VERSION = "rule-based-content-analyzer-v1"
-    GEMINI_VERSION = "gemini-content-analyzer-v1"
+    GEMINI_VERSION = "gemini-content-analyzer-v2"
     FALLBACK_VERSION = "rule-based-content-analyzer-v1:gemini-fallback"
     MAX_TOPICS = 12
 
@@ -70,6 +70,17 @@ class LLMContentAnalyzer(ContentAnalyzer):
         if not isinstance(self.settings, AISettings):
             raise ValueError("settings must be AISettings")
         self.gemini_client = gemini_client
+        self._generator = None
+
+    def close(self) -> None:
+        if self._generator is not None:
+            self._generator.close()
+
+    @property
+    def cache_version(self) -> str:
+        if self.settings.provider == AIProvider.GEMINI:
+            return f"{self.GEMINI_VERSION}:{self.settings.gemini_model}:{self.settings.analysis_thinking_level}"
+        return self.VERSION
 
     @staticmethod
     def _source_ids(segments: tuple[ProcessedSegment, ...]) -> tuple[str, ...]:
@@ -104,8 +115,8 @@ class LLMContentAnalyzer(ContentAnalyzer):
         payload = {
             "video_id": transcript.video_id,
             "segments": [
-                {"id": item.id, "start_ms": item.start_ms, "end_ms": item.end_ms, "text": item.text}
-                for item in transcript.segments
+                {"id": str(index), "start_ms": item.start_ms, "end_ms": item.end_ms, "text": item.text}
+                for index, item in enumerate(transcript.segments)
             ],
         }
         return (
@@ -117,14 +128,14 @@ class LLMContentAnalyzer(ContentAnalyzer):
             "시간, 원본 ID, 요약 밖의 구조를 임의로 추가하지 마세요.\n"
             "필수 JSON 구조: {\"summary\":\"...\",\"topics\":[{\"title\":\"...\","
             "\"description\":\"...\",\"processed_segment_ids\":[\"...\"]}]}\n"
-            "입력 JSON:\n" + json.dumps(payload, ensure_ascii=False)
+            "입력 JSON:\n" + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         )
 
     @classmethod
     def _from_gemini(
         cls, transcript: ProcessedTranscript, parsed: _GeminiVideoAnalysis, model: str,
     ) -> VideoAnalysis:
-        lookup = {segment.id: segment for segment in transcript.segments}
+        lookup = {str(index): segment for index, segment in enumerate(transcript.segments)}
         topics = []
         for item in parsed.topics:
             if len(item.processed_segment_ids) != len(set(item.processed_segment_ids)):
@@ -153,16 +164,22 @@ class LLMContentAnalyzer(ContentAnalyzer):
 
         baseline = self._rule_based(transcript)
         if self.settings.provider == AIProvider.RULE_BASED or not transcript.segments:
-            return baseline
+            return baseline.model_copy(update={"analyzer_version": self.cache_version})
         if self.settings.provider != AIProvider.GEMINI:
             raise AppError(ErrorCode.INVALID_INPUT, f"AI 제공자 '{self.settings.provider.value}'는 아직 구현되지 않았습니다.")
 
-        generator = GeminiStructuredGenerator(
-            self.settings.gemini_api_key, self.settings.gemini_model, self.gemini_client,
-        )
+        if self._generator is None:
+            self._generator = GeminiStructuredGenerator(
+                self.settings.gemini_api_key, self.settings.gemini_model, self.gemini_client,
+                thinking_level=self.settings.analysis_thinking_level,
+                timeout_seconds=self.settings.gemini_timeout_seconds,
+            )
+        generator = self._generator
         try:
             response = generator.generate(self._prompt(transcript), _GeminiVideoAnalysis)
-            return self._from_gemini(transcript, response, self.settings.gemini_model)
+            return self._from_gemini(transcript, response, self.settings.gemini_model).model_copy(
+                update={"analyzer_version": self.cache_version},
+            )
         except (GeminiProcessingError, ValueError) as exc:
             if self.settings.fallback == AIFallbackPolicy.RULE_BASED:
                 logger.warning("Gemini 영상 분석 실패로 규칙 기반 결과를 사용합니다 (%s).", type(exc).__name__)
@@ -246,7 +263,7 @@ class LLMProjectAnalyzer(ProjectAnalyzer):
             "각 키워드는 추천 이유와 근거 topic_ids(실제 입력의 주제 ID)를 포함해야 합니다.\n"
             "새 주제 ID를 만들어 내지 말고 추론할 근거가 없으면 keywords=[]로 반환하세요.\n"
             "필수 JSON 구조: {\"keywords\":[{\"keyword\":\"...\",\"reason\":\"...\",\"topic_ids\":[\"...\"]}]}\n"
-            "입력 JSON:\n" + json.dumps(payload, ensure_ascii=False)
+            "입력 JSON:\n" + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         )
 
     @classmethod

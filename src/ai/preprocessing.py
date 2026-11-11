@@ -7,6 +7,8 @@ Python 코드가 생성·보존합니다. API 실패 시 기본적으로 전체 
 """
 
 import logging
+import hashlib
+import json
 import re
 import unicodedata
 from typing import Any
@@ -28,7 +30,7 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
     """기존 Core 인터페이스를 바꾸지 않고 AI 제공자를 선택합니다."""
 
     VERSION = "rule-based-preprocessor-v1"
-    GEMINI_VERSION = "gemini-preprocessor-v1"
+    GEMINI_VERSION = "gemini-preprocessor-v2"
     FALLBACK_VERSION = "rule-based-preprocessor-v1:gemini-fallback"
     _END_MARKS = (".", "!", "?", "。", "！", "？", "…")
 
@@ -51,6 +53,28 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
         self.merge_adjacent = merge_adjacent
         self.settings = settings if settings is not None else AISettings.from_env()
         self.gemini_client = gemini_client
+        self._refiner = None
+
+    def close(self) -> None:
+        if self._refiner is not None:
+            self._refiner.close()
+
+    @property
+    def cache_version(self) -> str:
+        config = {
+            "max_gap_ms": self.max_gap_ms, "max_chars": self.max_chars,
+            "merge_adjacent": self.merge_adjacent,
+        }
+        prefix = self.VERSION
+        if self.settings.provider == AIProvider.GEMINI:
+            prefix = f"{self.GEMINI_VERSION}:{self.settings.gemini_model}"
+            config.update(
+                thinking=self.settings.preprocessing_thinking_level,
+                batch_segments=self.settings.preprocessing_batch_segments,
+                batch_characters=self.settings.preprocessing_batch_characters,
+            )
+        fingerprint = hashlib.sha256(json.dumps(config, sort_keys=True).encode()).hexdigest()[:16]
+        return f"{prefix}:{fingerprint}"
 
     @staticmethod
     def _normalize_text(text: str) -> str:
@@ -100,7 +124,7 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
             video_id=transcript.video_id,
             source_transcript_id=transcript.id,
             segments=tuple(processed),
-            preprocessing_version=self.VERSION,
+            preprocessing_version=self.cache_version,
             is_stub=False,
         )
 
@@ -116,13 +140,19 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
         if provider != AIProvider.GEMINI:
             raise AppError(ErrorCode.INVALID_INPUT, f"AI 제공자 '{provider.value}'는 아직 구현되지 않았습니다.")
 
-        refiner = GeminiTranscriptRefiner(
-            api_key=self.settings.gemini_api_key,
-            model=self.settings.gemini_model,
-            client=self.gemini_client,
-            max_concurrency=self.settings.preprocessing_concurrency,
-            max_retries=self.settings.preprocessing_max_retries,
-        )
+        if self._refiner is None:
+            self._refiner = GeminiTranscriptRefiner(
+                api_key=self.settings.gemini_api_key,
+                model=self.settings.gemini_model,
+                client=self.gemini_client,
+                max_concurrency=self.settings.preprocessing_concurrency,
+                max_retries=self.settings.preprocessing_max_retries,
+                thinking_level=self.settings.preprocessing_thinking_level,
+                timeout_seconds=self.settings.gemini_timeout_seconds,
+                batch_segments=self.settings.preprocessing_batch_segments,
+                batch_characters=self.settings.preprocessing_batch_characters,
+            )
+        refiner = self._refiner
         try:
             corrected_texts = refiner.refine(baseline.segments)
         except GeminiProcessingError as exc:
@@ -147,6 +177,6 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
             video_id=baseline.video_id,
             source_transcript_id=baseline.source_transcript_id,
             segments=corrected,
-            preprocessing_version=f"{self.GEMINI_VERSION}:{self.settings.gemini_model}",
+            preprocessing_version=self.cache_version,
             is_stub=False,
         )

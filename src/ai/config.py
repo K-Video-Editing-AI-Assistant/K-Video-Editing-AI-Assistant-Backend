@@ -41,6 +41,11 @@ class AISettings:
     gemini_model: str = "gemini-3.8-flash"
     preprocessing_concurrency: int = 3
     preprocessing_max_retries: int = 2
+    preprocessing_thinking_level: str = "low"
+    analysis_thinking_level: str = "medium"
+    preprocessing_batch_segments: int = 16
+    preprocessing_batch_characters: int = 6000
+    gemini_timeout_seconds: int = 300
 
     def __post_init__(self) -> None:
         if not isinstance(self.provider, AIProvider):
@@ -51,6 +56,16 @@ class AISettings:
             raise ValueError("PREPROCESSING_CONCURRENCY는 1~8 정수여야 합니다.")
         if type(self.preprocessing_max_retries) is not int or not 0 <= self.preprocessing_max_retries <= 5:
             raise ValueError("PREPROCESSING_MAX_RETRIES는 0~5 정수여야 합니다.")
+        for level in (self.preprocessing_thinking_level, self.analysis_thinking_level):
+            if level not in {"default", "low", "medium", "high"}:
+                raise ValueError("thinking level은 default/low/medium/high 중 하나여야 합니다.")
+        for name, value, upper in (
+            ("PREPROCESSING_BATCH_SEGMENTS", self.preprocessing_batch_segments, 128),
+            ("PREPROCESSING_BATCH_CHARACTERS", self.preprocessing_batch_characters, 20000),
+            ("GEMINI_TIMEOUT_SECONDS", self.gemini_timeout_seconds, 600),
+        ):
+            if type(value) is not int or not 1 <= value <= upper:
+                raise ValueError(f"{name}은 1~{upper} 정수여야 합니다.")
         if not self.gemini_model.strip():
             raise ValueError("gemini_model은 비어 있을 수 없습니다.")
 
@@ -80,4 +95,9 @@ class AISettings:
             gemini_model=read("GEMINI_MODEL") or cls.gemini_model,
             preprocessing_concurrency=int(read("PREPROCESSING_CONCURRENCY") or cls.preprocessing_concurrency),
             preprocessing_max_retries=int(read("PREPROCESSING_MAX_RETRIES") or cls.preprocessing_max_retries),
+            preprocessing_thinking_level=(read("PREPROCESSING_THINKING_LEVEL") or cls.preprocessing_thinking_level).lower(),
+            analysis_thinking_level=(read("ANALYSIS_THINKING_LEVEL") or cls.analysis_thinking_level).lower(),
+            preprocessing_batch_segments=int(read("PREPROCESSING_BATCH_SEGMENTS") or cls.preprocessing_batch_segments),
+            preprocessing_batch_characters=int(read("PREPROCESSING_BATCH_CHARACTERS") or cls.preprocessing_batch_characters),
+            gemini_timeout_seconds=int(read("GEMINI_TIMEOUT_SECONDS") or cls.gemini_timeout_seconds),
         )
