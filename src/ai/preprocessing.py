@@ -121,6 +121,7 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
             model=self.settings.gemini_model,
             client=self.gemini_client,
             max_concurrency=self.settings.preprocessing_concurrency,
+            max_retries=self.settings.preprocessing_max_retries,
         )
         try:
             corrected_texts = refiner.refine(baseline.segments)
@@ -129,7 +130,7 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
                 # API 키·자막 원문·서비스 응답을 로그에 남기지 않습니다.
                 logger.warning("Gemini 전처리 실패로 규칙 기반 결과를 반환합니다 (%s).", type(exc).__name__)
                 return baseline.model_copy(update={"preprocessing_version": self.FALLBACK_VERSION})
-            raise AppError(ErrorCode.ANALYSIS_FAILED, "Gemini 자막 전처리에 실패했습니다.", retryable=True) from exc
+            raise AppError(ErrorCode.ANALYSIS_FAILED, "Gemini 자막 전처리에 실패했습니다.", retryable=exc.retryable) from exc
 
         corrected = tuple(
             ProcessedSegment(

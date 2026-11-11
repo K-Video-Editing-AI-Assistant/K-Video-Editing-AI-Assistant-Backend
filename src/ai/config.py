@@ -40,6 +40,7 @@ class AISettings:
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.8-flash"
     preprocessing_concurrency: int = 3
+    preprocessing_max_retries: int = 2
 
     def __post_init__(self) -> None:
         if not isinstance(self.provider, AIProvider):
@@ -48,6 +49,8 @@ class AISettings:
             raise ValueError("fallback은 AIFallbackPolicy 열거형이어야 합니다.")
         if type(self.preprocessing_concurrency) is not int or not 1 <= self.preprocessing_concurrency <= 8:
             raise ValueError("PREPROCESSING_CONCURRENCY는 1~8 정수여야 합니다.")
+        if type(self.preprocessing_max_retries) is not int or not 0 <= self.preprocessing_max_retries <= 5:
+            raise ValueError("PREPROCESSING_MAX_RETRIES는 0~5 정수여야 합니다.")
         if not self.gemini_model.strip():
             raise ValueError("gemini_model은 비어 있을 수 없습니다.")
 
@@ -76,4 +79,5 @@ class AISettings:
             gemini_api_key=read("GEMINI_API_KEY") or read("GOOGLE_API_KEY"),
             gemini_model=read("GEMINI_MODEL") or cls.gemini_model,
             preprocessing_concurrency=int(read("PREPROCESSING_CONCURRENCY") or cls.preprocessing_concurrency),
+            preprocessing_max_retries=int(read("PREPROCESSING_MAX_RETRIES") or cls.preprocessing_max_retries),
         )
