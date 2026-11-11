@@ -6,6 +6,7 @@
 
 import json
 import logging
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from time import perf_counter
 from typing import Any
 
@@ -81,7 +82,13 @@ class GeminiTranscriptRefiner:
     MAX_BATCH_SEGMENTS = 16
     MAX_BATCH_CHARACTERS = 6000
 
-    def __init__(self, api_key: str | None, model: str, client: Any | None = None):
+    def __init__(
+        self, api_key: str | None, model: str, client: Any | None = None,
+        *, max_concurrency: int = 1,
+    ):
+        if type(max_concurrency) is not int or not 1 <= max_concurrency <= 8:
+            raise ValueError("max_concurrency는 1~8 정수여야 합니다.")
+        self.max_concurrency = max_concurrency
         self.model = model
         if client is not None:
             self.client = client
@@ -170,18 +177,18 @@ class GeminiTranscriptRefiner:
         batches = tuple(self._batches(segments))
         started = perf_counter()
         logger.info(
-            "Gemini 자막 교정 시작 — 자막 %d개, 배치 %d개, 동시 요청 수 1",
-            len(segments), len(batches),
+            "Gemini 자막 교정 시작 — 자막 %d개, 배치 %d개, 동시 요청 수 %d",
+            len(segments), len(batches), self.max_concurrency,
         )
-        output: list[str] = []
-        for index, batch in enumerate(batches, start=1):
+        def run_batch(index, batch):
+            index += 1
             batch_started = perf_counter()
             logger.info(
                 "Gemini 자막 교정 배치 %d/%d 시작 — 자막 %d개, 텍스트 %d자",
                 index, len(batches), len(batch), sum(len(item.text) for item in batch),
             )
             try:
-                output.extend(self._refine_batch(batch))
+                result = self._refine_batch(batch)
             except GeminiProcessingError:
                 logger.warning(
                     "Gemini 자막 교정 배치 %d/%d 실패 — 배치 %.1f초, 전체 경과 %.1f초",
@@ -193,11 +200,43 @@ class GeminiTranscriptRefiner:
                 "Gemini 자막 교정 배치 %d/%d 완료 — %.1f초 (응답 검증 포함)",
                 index, len(batches), perf_counter() - batch_started,
             )
+            return result
+
+        results = [None] * len(batches)
+        if self.max_concurrency == 1:
+            for index, batch in enumerate(batches):
+                results[index] = run_batch(index, batch)
+        elif batches:
+            # 한 번에 동시 실행 수만큼만 제출합니다. 실패하면 새 배치를 제출하지 않습니다.
+            with ThreadPoolExecutor(max_workers=self.max_concurrency) as pool:
+                next_index = 0
+                pending = {}
+                try:
+                    while next_index < min(self.max_concurrency, len(batches)):
+                        future = pool.submit(run_batch, next_index, batches[next_index])
+                        pending[future] = next_index
+                        next_index += 1
+                    while pending:
+                        done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                        # 완료 묶음에 실패가 있으면 다음 배치를 제출하기 전에 전파합니다.
+                        for future in done:
+                            index = pending.pop(future)
+                            results[index] = future.result()
+                        for _ in done:
+                            if next_index < len(batches):
+                                future = pool.submit(run_batch, next_index, batches[next_index])
+                                pending[future] = next_index
+                                next_index += 1
+                except BaseException:
+                    for future in pending:
+                        future.cancel()
+                    raise
+        # 이미 실행 중인 HTTP 호출은 중단할 수 없으므로 종료를 기다린 뒤 예외를 전파합니다.
         logger.info(
             "Gemini 자막 교정 전체 완료 — 배치 %d개, 전체 %.1f초",
             len(batches), perf_counter() - started,
         )
-        return tuple(output)
+        return tuple(text for batch_result in results for text in batch_result)
 
 
 class GeminiStructuredGenerator:

@@ -120,6 +120,7 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
             api_key=self.settings.gemini_api_key,
             model=self.settings.gemini_model,
             client=self.gemini_client,
+            max_concurrency=self.settings.preprocessing_concurrency,
         )
         try:
             corrected_texts = refiner.refine(baseline.segments)

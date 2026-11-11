@@ -39,12 +39,15 @@ class AISettings:
     fallback: AIFallbackPolicy = AIFallbackPolicy.RULE_BASED
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-3.8-flash"
+    preprocessing_concurrency: int = 3
 
     def __post_init__(self) -> None:
         if not isinstance(self.provider, AIProvider):
             raise ValueError("provider는 AIProvider 열거형이어야 합니다.")
         if not isinstance(self.fallback, AIFallbackPolicy):
             raise ValueError("fallback은 AIFallbackPolicy 열거형이어야 합니다.")
+        if type(self.preprocessing_concurrency) is not int or not 1 <= self.preprocessing_concurrency <= 8:
+            raise ValueError("PREPROCESSING_CONCURRENCY는 1~8 정수여야 합니다.")
         if not self.gemini_model.strip():
             raise ValueError("gemini_model은 비어 있을 수 없습니다.")
 
@@ -72,4 +75,5 @@ class AISettings:
             fallback=fallback,
             gemini_api_key=read("GEMINI_API_KEY") or read("GOOGLE_API_KEY"),
             gemini_model=read("GEMINI_MODEL") or cls.gemini_model,
+            preprocessing_concurrency=int(read("PREPROCESSING_CONCURRENCY") or cls.preprocessing_concurrency),
         )
