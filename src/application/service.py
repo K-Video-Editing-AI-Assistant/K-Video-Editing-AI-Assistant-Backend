@@ -4,6 +4,8 @@
 영상 준비 → 내용 분석 → 요청별 추천 → 편집 계획 승인 → 렌더링 순서를 관리합니다.
 """
 
+import logging
+from time import perf_counter
 from threading import RLock
 
 from application.jobs import JobScheduler
@@ -20,6 +22,9 @@ from core.models import (
     SubtitleStyle, Transcript, VideoAnalysis, VideoAsset, new_id, utc_now,
 )
 from processing.files import save_upload, write_srt
+
+
+logger = logging.getLogger(__name__)
 
 
 class ApplicationService:
@@ -79,6 +84,8 @@ class ApplicationService:
     def prepare_video(self, project_id: str, video_id: str) -> VideoAnalysis:
         """영상 1개의 자막 추출·전처리·요약 및 주제 분석 결과를 저장하고 반환합니다."""
         video = self.get_video(project_id, video_id)
+        started = perf_counter()
+        logger.info("자막 추출 단계 시작")
         self.scheduler.report_stage("transcribing")
         try:
             transcript = self.store.video_data(project_id, video.id, "transcript")
@@ -92,7 +99,10 @@ class ApplicationService:
             self.store.save_video_data(project_id, video.id, "transcript", transcript)
             write_srt(transcript, self.store.video_dir(project_id, video.id) / "transcript.srt")
         self._validate_transcript(video, transcript)
+        logger.info("자막 추출 단계 완료 — %d개 구간, %.1f초 (캐시 사용 시 포함)", len(transcript.segments), perf_counter() - started)
 
+        started = perf_counter()
+        logger.info("자막 전처리 단계 시작")
         self.scheduler.report_stage("preprocessing")
         try:
             processed = self.store.video_data(project_id, video.id, "processed")
@@ -105,7 +115,10 @@ class ApplicationService:
             self._validate_processed(transcript, processed)
             self.store.save_video_data(project_id, video.id, "processed", processed)
         self._validate_processed(transcript, processed)
+        logger.info("자막 전처리 단계 완료 — %.1f초", perf_counter() - started)
 
+        started = perf_counter()
+        logger.info("요약·주제 분석 단계 시작")
         self.scheduler.report_stage("analyzing")
         try:
             analysis = self.store.video_data(project_id, video.id, "analysis")
@@ -120,6 +133,7 @@ class ApplicationService:
             self._validate_analysis(video, transcript, processed, analysis)
             self.store.save_video_data(project_id, video.id, "analysis", analysis)
         self._validate_analysis(video, transcript, processed, analysis)
+        logger.info("요약·주제 분석 단계 완료 — %.1f초", perf_counter() - started)
 
         return analysis
 

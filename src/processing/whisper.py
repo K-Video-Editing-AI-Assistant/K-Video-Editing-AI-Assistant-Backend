@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import platform
 import logging
+from time import perf_counter
 
 from dotenv import dotenv_values
 import subprocess
@@ -35,6 +36,9 @@ from core.models import Transcript, TranscriptSegment, VideoAsset, new_id
 
 if TYPE_CHECKING:  
     import numpy as np
+
+
+logger = logging.getLogger(__name__)
 
 
 RawSegment = tuple[float, float, str]
@@ -95,7 +99,9 @@ class WhisperTranscriber(Transcriber):
 
         with tempfile.TemporaryDirectory(prefix="clipnote-whisper-") as tmp:
             wav = Path(tmp) / "audio.wav"
+            logger.info("오디오 추출 시작 — 영상 %.1f초", video.duration_ms / 1000)
             self._extract_audio(source, wav, video.duration_ms)
+            logger.info("오디오 추출 완료")
             raw = self._run_model(wav)
 
         return self._build(video, self._to_segments(raw, video.duration_ms))
@@ -166,13 +172,26 @@ class WhisperTranscriber(Transcriber):
         audio = self._load_wav(wav)
         if audio.size == 0:
             return []
+        started = perf_counter()
+        logger.info("Whisper 모델 로드 시작 — %s / %s / %s", self.model_size, self.device, self.compute_type)
         model = self._load_model()
+        logger.info("Whisper 모델 로드 완료 — %.1f초", perf_counter() - started)
+        started = perf_counter()
+        logger.info("자막 인식 시작 — 첫 구간이 생성될 때까지 출력이 없을 수 있습니다")
         try:
             segments, _info = model.transcribe(
                 audio, language=self.language, beam_size=self.beam_size,
                 vad_filter=self.vad_filter,
             )
-            return [(seg.start, seg.end, seg.text) for seg in segments]
+            result = []
+            for seg in segments:
+                result.append((seg.start, seg.end, seg.text))
+                logger.info(
+                    "자막 인식 중: %.1f~%.1f초 — %d개 구간, 경과 %.1f초",
+                    seg.start, seg.end, len(result), perf_counter() - started,
+                )
+            logger.info("자막 인식 완료 — %d개 구간, %.1f초", len(result), perf_counter() - started)
+            return result
         except Exception as exc:
             raise AppError(
                 ErrorCode.TRANSCRIPTION_FAILED, f"음성 인식 실패: {exc}", retryable=True
