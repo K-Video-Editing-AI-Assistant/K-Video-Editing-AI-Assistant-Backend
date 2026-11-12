@@ -124,6 +124,16 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
         try:
             corrected_texts = refiner.refine(baseline.segments)
         except GeminiProcessingError as exc:
+            cause = exc.__cause__
+            code = getattr(cause, "code", None)
+            # SDK 상세 메시지에는 요청 데이터가 포함될 수 있어 유형/숫자 코드만 기록합니다.
+            logger.error(
+                "Gemini 자막 전처리 실패 — 모델 %s, 원인 %s, HTTP 코드 %s, 구분 %s",
+                self.settings.gemini_model,
+                type(cause).__name__ if cause is not None else type(exc).__name__,
+                code if isinstance(code, int) else "unknown",
+                "api_request" if str(exc) == "Gemini API 호출에 실패했습니다." else "response_validation",
+            )
             if self.settings.fallback == AIFallbackPolicy.RULE_BASED:
                 # API 키·자막 원문·서비스 응답을 로그에 남기지 않습니다.
                 logger.warning("Gemini 전처리 실패로 규칙 기반 결과를 반환합니다 (%s).", type(exc).__name__)
@@ -148,3 +158,10 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
             preprocessing_version=f"{self.GEMINI_VERSION}:{self.settings.gemini_model}",
             is_stub=False,
         )
+
+
+class RuleBasedTranscriptPreprocessor(AITranscriptPreprocessor):
+    """로컬 규칙만 사용하며 다른 AI 모듈의 제공자 설정을 변경하지 않습니다."""
+
+    def __init__(self):
+        super().__init__(settings=AISettings(provider=AIProvider.RULE_BASED))

@@ -18,7 +18,7 @@ from processing.ffmpeg import FFmpegVideoEditor
 from processing.stub import StubTranscriber, StubVideoEditor
 from processing.whisper import WhisperTranscriber
 from ai.analyzer import LLMContentAnalyzer
-from ai.preprocessing import AITranscriptPreprocessor
+from ai.preprocessing import AITranscriptPreprocessor, RuleBasedTranscriptPreprocessor
 
 # After developing a real implementation, import it here and add a key.
 TRANSCRIBERS = {
@@ -27,6 +27,7 @@ TRANSCRIBERS = {
 }
 PREPROCESSORS = {
     "stub": StubPreprocessor,
+    "rule_based": RuleBasedTranscriptPreprocessor,
     "ai": AITranscriptPreprocessor,
 }
 ANALYZERS = {

@@ -11,6 +11,8 @@ class ErrorCode(str, Enum):
     """UI/작업자가 처리 유형을 판단하는 안정적인 오류 코드."""
 
     INVALID_INPUT = "invalid_input"           # 필수 입력·요청 값 오류
+    UPLOAD_TOO_LARGE = "upload_too_large"
+    UNSUPPORTED_FILE_TYPE = "unsupported_file_type"
     NOT_FOUND = "not_found"                   # 대상 프로젝트/영상/결과 없음
     INVALID_REFERENCE = "invalid_reference"   # 다른 객체를 가리키는 ID가 잘못됨
     INVALID_PLAN = "invalid_plan"             # 편집 구간·승인 조건 위반

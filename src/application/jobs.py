@@ -94,7 +94,14 @@ class JobScheduler:
             self.store.save(finished)
 
         with self.lock:
-            self.futures[status.id] = self.worker.submit(task)
+            try:
+                self.futures[status.id] = self.worker.submit(task)
+            except RuntimeError as exc:
+                self.store.save(JobStatus.model_validate({
+                    **status.model_dump(), "state": JobState.FAILED,
+                    "error_message": "작업을 등록하지 못했습니다.", "updated_at": utc_now(),
+                }))
+                raise AppError(ErrorCode.STORAGE_FAILED, "작업을 등록하지 못했습니다.") from exc
         return status
 
     def report_stage(self, stage: str) -> None:
