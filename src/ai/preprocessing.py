@@ -158,3 +158,10 @@ class AITranscriptPreprocessor(TranscriptPreprocessor):
             preprocessing_version=f"{self.GEMINI_VERSION}:{self.settings.gemini_model}",
             is_stub=False,
         )
+
+
+class RuleBasedTranscriptPreprocessor(AITranscriptPreprocessor):
+    """로컬 규칙만 사용하며 다른 AI 모듈의 제공자 설정을 변경하지 않습니다."""
+
+    def __init__(self):
+        super().__init__(settings=AISettings(provider=AIProvider.RULE_BASED))
