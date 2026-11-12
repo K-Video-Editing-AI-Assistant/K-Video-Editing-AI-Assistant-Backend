@@ -144,8 +144,16 @@ class WhisperTranscriber(Transcriber):
                         'faster-whisper가 설치되지 않았습니다. pip install -e ".[test]"를 다시 실행하세요.',
                     ) from exc
                 try:
+                    model_path = self.model_size
+                    if not Path(model_path).is_dir():
+                        from faster_whisper.utils import download_model
+                        try:
+                            model_path = download_model(self.model_size, local_files_only=True)
+                            logger.info("Whisper 로컬 모델 파일 재사용")
+                        except FileNotFoundError:
+                            logger.info("Whisper 로컬 모델이 없어 다운로드합니다")
                     self._model_cache[key] = WhisperModel(
-                        self.model_size, device=self.device, compute_type=self.compute_type
+                        model_path, device=self.device, compute_type=self.compute_type
                     )
                 except Exception as exc:
                     raise AppError(

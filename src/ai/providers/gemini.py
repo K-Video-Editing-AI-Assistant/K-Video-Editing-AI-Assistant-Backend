@@ -5,6 +5,13 @@
 """
 
 import json
+import logging
+import importlib
+from random import uniform
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextvars import ContextVar
+from threading import Event, Lock
+from time import perf_counter, sleep
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -13,8 +20,34 @@ from core.errors import AppError, ErrorCode
 from core.models import ProcessedSegment
 
 
+logger = logging.getLogger(__name__)
+
+
+def _generation_options(model: str, thinking_level: str) -> dict:
+    # Gemini 3.8의 MINIMAL 및 sampling 옵션은 지원되지 않습니다.
+    options = {"automatic_function_calling": {"disable": True}}
+    if model.startswith("gemini-3") and thinking_level != "default":
+        options["thinking_config"] = {"thinking_level": thinking_level.upper()}
+    return options
+
+
+def _log_usage(response) -> None:
+    usage = getattr(response, "usage_metadata", None)
+    if usage is None:
+        return
+    values = [getattr(usage, field, None) for field in (
+        "prompt_token_count", "candidates_token_count", "thoughts_token_count",
+    )]
+    if all(value is None or type(value) is int for value in values):
+        logger.info("Gemini 토큰 사용 — 입력 %s / 출력 %s / 추론 %s", *values)
+
+
 class GeminiProcessingError(RuntimeError):
     """Gemini 호출 실패 또는 잘못된 응답으로 안전한 결과를 만들 수 없는 경우."""
+
+    def __init__(self, message: str, *, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class _CorrectedSegment(BaseModel):
@@ -76,7 +109,28 @@ class GeminiTranscriptRefiner:
     MAX_BATCH_SEGMENTS = 16
     MAX_BATCH_CHARACTERS = 6000
 
-    def __init__(self, api_key: str | None, model: str, client: Any | None = None):
+    def __init__(
+        self, api_key: str | None, model: str, client: Any | None = None,
+        *, max_concurrency: int = 1, max_retries: int = 2,
+        thinking_level: str = "low", timeout_seconds: int = 300,
+        batch_segments: int = 16, batch_characters: int = 6000,
+    ):
+        if type(max_concurrency) is not int or not 1 <= max_concurrency <= 8:
+            raise ValueError("max_concurrency는 1~8 정수여야 합니다.")
+        if type(max_retries) is not int or not 0 <= max_retries <= 5:
+            raise ValueError("max_retries는 0~5 정수여야 합니다.")
+        if thinking_level not in {"default", "low", "medium", "high"}:
+            raise ValueError("올바르지 않은 thinking_level입니다.")
+        for value, upper in ((batch_segments, 128), (batch_characters, 20000), (timeout_seconds, 600)):
+            if type(value) is not int or not 1 <= value <= upper:
+                raise ValueError("배치 크기 또는 제한 시간이 허용 범위를 벗어났습니다.")
+        self._cancel_event = ContextVar("gemini_refine_cancel", default=None)
+        self._owns_client = client is None
+        self.thinking_level = thinking_level
+        self.batch_segments = batch_segments
+        self.batch_characters = batch_characters
+        self.max_retries = max_retries
+        self.max_concurrency = max_concurrency
         self.model = model
         if client is not None:
             self.client = client
@@ -93,12 +147,19 @@ class GeminiTranscriptRefiner:
                 "Gemini SDK가 없습니다. 'python -m pip install google-genai'를 실행하세요.",
             ) from exc
 
-        self.client = genai.Client(api_key=api_key)
+        # 재시도는 배치 단위로 관리합니다. SDK 재시도와 중첩되지 않도록 제한합니다.
+        self.client = genai.Client(
+            api_key=api_key, http_options={"retry_options": {"attempts": 1}, "timeout": timeout_seconds * 1000},
+        )
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
 
     @staticmethod
     def _make_prompt(segments: tuple[ProcessedSegment, ...]) -> str:
         payload = {
-            "segments": [{"id": segment.id, "text": segment.text} for segment in segments],
+            "segments": [{"id": str(index), "text": segment.text} for index, segment in enumerate(segments)],
         }
         return (
             "당신은 영상 자막의 보수적인 교정자입니다.\n"
@@ -109,16 +170,18 @@ class GeminiTranscriptRefiner:
             "모든 입력 ID를 정확히 한 번씩 포함하고, 원래 순서를 유지하세요.\n"
             "반환 JSON 형식: {\"segments\": [{\"id\": \"...\", \"text\": \"...\"}]}\n"
             "시간 정보, 원본 자막 ID, 설명 등 다른 필드는 출력하지 마세요.\n\n"
-            "교정 대상:\n" + json.dumps(payload, ensure_ascii=False)
+            "교정 대상:\n" + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         )
 
     @classmethod
-    def _batches(cls, segments: tuple[ProcessedSegment, ...]):
+    def _batches(cls, segments: tuple[ProcessedSegment, ...], max_segments=None, max_characters=None):
+        max_segments = max_segments or cls.MAX_BATCH_SEGMENTS
+        max_characters = max_characters or cls.MAX_BATCH_CHARACTERS
         batch: list[ProcessedSegment] = []
         size = 0
         for segment in segments:
             length = len(segment.text)
-            if batch and (len(batch) >= cls.MAX_BATCH_SEGMENTS or size + length > cls.MAX_BATCH_CHARACTERS):
+            if batch and (len(batch) >= max_segments or size + length > max_characters):
                 yield tuple(batch)
                 batch = []
                 size = 0
@@ -127,25 +190,63 @@ class GeminiTranscriptRefiner:
         if batch:
             yield tuple(batch)
 
-    def _refine_batch(self, segments: tuple[ProcessedSegment, ...]) -> tuple[str, ...]:
-        try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=self._make_prompt(segments),
-                config={
-                    "response_mime_type": "application/json",
-                    "response_json_schema": _gemini_response_schema(_CorrectionResponse),
-                },
-            )
-        except Exception as exc:
-            # SDK 예외의 상세 텍스트(인증 정보·요청 본문 등)는 상위 로그에 노출하지 않습니다.
-            raise GeminiProcessingError("Gemini API 호출에 실패했습니다.") from exc
+    @staticmethod
+    def _is_retryable(exc: Exception) -> bool:
+        code = getattr(exc, "code", None)
+        if code is not None:
+            return code in {408, 429, 500, 502, 503, 504}
+        if isinstance(exc, (TimeoutError, ConnectionError)):
+            return True
+        # SDK 버전에 따라 HTTP 전송 계층이 httpx 또는 httpx2일 수 있습니다.
+        for module_name in ("httpx", "httpx2"):
+            try:
+                transport = importlib.import_module(module_name)
+            except ImportError:
+                continue
+            if isinstance(exc, (transport.TimeoutException, transport.NetworkError)):
+                return True
+        return False
 
+    def _request_batch(self, segments: tuple[ProcessedSegment, ...]):
+        cancel = self._cancel_event.get()
+        for attempt in range(self.max_retries + 1):
+            if cancel is not None and cancel.is_set():
+                raise GeminiProcessingError("다른 배치 실패로 자막 교정 요청을 취소했습니다.")
+            try:
+                return self.client.models.generate_content(
+                    model=self.model,
+                    contents=self._make_prompt(segments),
+                    config={
+                        **_generation_options(self.model, self.thinking_level),
+                        "response_mime_type": "application/json",
+                        "response_json_schema": _gemini_response_schema(_CorrectionResponse),
+                    },
+                )
+            except Exception as exc:
+                retryable = self._is_retryable(exc)
+                if not retryable or attempt == self.max_retries:
+                    raise GeminiProcessingError(
+                        "Gemini API 호출에 실패했습니다.", retryable=retryable,
+                    ) from exc
+                delay = min(2 ** attempt + uniform(0, 1), 60)
+                logger.warning(
+                    "Gemini 자막 교정 일시적 요청 오류 — 재시도 %d/%d, %.1f초 후 실행",
+                    attempt + 1, self.max_retries, delay,
+                )
+                if cancel is not None:
+                    if cancel.wait(delay):
+                        raise GeminiProcessingError("다른 배치 실패로 재시도를 취소했습니다.") from exc
+                else:
+                    sleep(delay)
+
+    def _refine_batch(self, segments: tuple[ProcessedSegment, ...]) -> tuple[str, ...]:
+        response = self._request_batch(segments)
+        _log_usage(response)
         try:
             if not response.text:
                 raise ValueError("empty Gemini response")
             parsed = _CorrectionResponse.model_validate_json(response.text)
-            expected_ids = [segment.id for segment in segments]
+            expected_ids = [str(index) for index in range(len(segments))]
             returned_ids = [segment.id for segment in parsed.segments]
             if returned_ids != expected_ids:
                 raise ValueError("Gemini segment IDs or order changed")
@@ -162,10 +263,81 @@ class GeminiTranscriptRefiner:
 
     def refine(self, segments: tuple[ProcessedSegment, ...]) -> tuple[str, ...]:
         """하나라도 실패하면 예외를 발생시켜 전체 규칙 기반 결과로 되돌립니다."""
-        output: list[str] = []
-        for batch in self._batches(segments):
-            output.extend(self._refine_batch(batch))
-        return tuple(output)
+        batches = tuple(self._batches(segments, self.batch_segments, self.batch_characters))
+        started = perf_counter()
+        logger.info(
+            "Gemini 자막 교정 시작 — 자막 %d개, 배치 %d개, 동시 요청 수 %d",
+            len(segments), len(batches), self.max_concurrency,
+        )
+        cancel = Event()
+        error_lock = Lock()
+        first_error = []
+        def run_batch(index, batch):
+            index += 1
+            batch_started = perf_counter()
+            logger.info(
+                "Gemini 자막 교정 배치 %d/%d 시작 — 자막 %d개, 텍스트 %d자",
+                index, len(batches), len(batch), sum(len(item.text) for item in batch),
+            )
+            token = self._cancel_event.set(cancel if self.max_concurrency > 1 and len(batches) > 1 else None)
+            try:
+                result = self._refine_batch(batch)
+            except GeminiProcessingError as exc:
+                with error_lock:
+                    if not first_error:
+                        first_error.append(exc)
+                    cancel.set()
+                logger.warning(
+                    "Gemini 자막 교정 배치 %d/%d 실패 — 배치 %.1f초, 전체 경과 %.1f초",
+                    index, len(batches), perf_counter() - batch_started,
+                    perf_counter() - started,
+                )
+                raise
+            finally:
+                self._cancel_event.reset(token)
+            logger.info(
+                "Gemini 자막 교정 배치 %d/%d 완료 — %.1f초 (응답 검증 포함)",
+                index, len(batches), perf_counter() - batch_started,
+            )
+            return result
+
+        results = [None] * len(batches)
+        if self.max_concurrency == 1:
+            for index, batch in enumerate(batches):
+                results[index] = run_batch(index, batch)
+        elif batches:
+            # 한 번에 동시 실행 수만큼만 제출합니다. 실패하면 새 배치를 제출하지 않습니다.
+            with ThreadPoolExecutor(max_workers=self.max_concurrency) as pool:
+                next_index = 0
+                pending = {}
+                try:
+                    while next_index < min(self.max_concurrency, len(batches)):
+                        future = pool.submit(run_batch, next_index, batches[next_index])
+                        pending[future] = next_index
+                        next_index += 1
+                    while pending:
+                        done, _ = wait(pending, return_when=FIRST_COMPLETED)
+                        # 완료 묶음에 실패가 있으면 다음 배치를 제출하기 전에 전파합니다.
+                        for future in done:
+                            index = pending.pop(future)
+                            results[index] = future.result()
+                        for _ in done:
+                            if next_index < len(batches):
+                                future = pool.submit(run_batch, next_index, batches[next_index])
+                                pending[future] = next_index
+                                next_index += 1
+                except BaseException as exc:
+                    for future in pending:
+                        future.cancel()
+                    if isinstance(exc, GeminiProcessingError) and first_error:
+                        raise first_error[0]
+                    raise
+        # 이미 실행 중인 HTTP 호출은 중단할 수 없으므로 종료를 기다린 뒤 예외를 전파합니다.
+        logger.info(
+            "Gemini 자막 교정 전체 완료 — 배치 %d개, 전체 %.1f초",
+            len(batches), perf_counter() - started,
+        )
+        return tuple(text for batch_result in results for text in batch_result)
 
 
 class GeminiStructuredGenerator:
@@ -176,8 +348,11 @@ class GeminiStructuredGenerator:
 
     MAX_PROMPT_CHARS = 80000
 
-    def __init__(self, api_key: str | None, model: str, client: Any | None = None):
+    def __init__(self, api_key: str | None, model: str, client: Any | None = None,
+                 *, thinking_level: str = "default", timeout_seconds: int = 300):
         self.model = model
+        self.thinking_level = thinking_level
+        self._owns_client = client is None
         if client is not None:
             self.client = client
             return
@@ -193,7 +368,11 @@ class GeminiStructuredGenerator:
                 "Gemini SDK가 없습니다. 'python -m pip install google-genai'를 실행하세요.",
             ) from exc
 
-        self.client = genai.Client(api_key=api_key)
+        self.client = genai.Client(api_key=api_key, http_options={"timeout": timeout_seconds * 1000})
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.client.close()
 
     def generate(
         self, prompt: str, schema: type[BaseModel], *, omit_array_bounds: bool = False,
@@ -210,12 +389,14 @@ class GeminiStructuredGenerator:
                 model=self.model,
                 contents=prompt,
                 config={
+                    **_generation_options(self.model, self.thinking_level),
                     "response_mime_type": "application/json",
                     "response_json_schema": _gemini_response_schema(
                         schema, omit_array_bounds=omit_array_bounds,
                     ),
                 },
             )
+            _log_usage(response)
             text = response.text
             if not text:
                 raise ValueError("empty response")

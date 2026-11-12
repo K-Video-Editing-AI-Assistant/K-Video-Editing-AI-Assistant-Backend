@@ -31,7 +31,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
-            service.scheduler.shutdown()
+            service.close()
             del app.state.application_service
 
     app = FastAPI(title="AI 영상편집 어시스턴트 API", version="0.1.0", lifespan=lifespan)

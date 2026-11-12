@@ -24,7 +24,7 @@ def test_local_preprocessing_keeps_analysis_provider(tmp_path, monkeypatch):
         result = service.preprocessor.preprocess(transcript)
         assert result.segments[0].text == "안녕하세요."
         assert result.segments[0].source_segment_ids == (transcript.segments[0].id,)
-        assert result.preprocessing_version == service.preprocessor.VERSION
+        assert result.preprocessing_version == service.preprocessor.cache_version
         assert result.is_stub is False
     finally:
         service.close()

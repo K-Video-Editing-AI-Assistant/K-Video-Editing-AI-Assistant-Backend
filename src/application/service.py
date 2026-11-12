@@ -129,7 +129,7 @@ class ApplicationService:
         self.scheduler.report_stage("preprocessing")
         try:
             processed = self.store.video_data(project_id, video.id, "processed")
-            if processed.source_transcript_id != transcript.id or processed.preprocessing_version != self.preprocessor.VERSION:
+            if processed.source_transcript_id != transcript.id or processed.preprocessing_version != getattr(self.preprocessor, "cache_version", self.preprocessor.VERSION):
                 raise AppError(ErrorCode.NOT_FOUND, "전처리 캐시 갱신 필요")
         except AppError as exc:
             if exc.code != ErrorCode.NOT_FOUND:
@@ -147,7 +147,7 @@ class ApplicationService:
             analysis = self.store.video_data(project_id, video.id, "analysis")
             if (analysis.transcript_id != transcript.id
                     or analysis.processed_transcript_id != processed.id
-                    or analysis.analyzer_version != self.analyzer.VERSION):
+                    or analysis.analyzer_version != getattr(self.analyzer, "cache_version", self.analyzer.VERSION)):
                 raise AppError(ErrorCode.NOT_FOUND, "AI 분석 캐시 갱신 필요")
         except AppError as exc:
             if exc.code != ErrorCode.NOT_FOUND:
@@ -355,3 +355,7 @@ class ApplicationService:
 
     def close(self) -> None:
         self.scheduler.shutdown()
+        for component in (self.preprocessor, self.analyzer):
+            close = getattr(component, "close", None)
+            if callable(close):
+                close()
