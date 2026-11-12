@@ -7,6 +7,7 @@
 import logging
 from time import perf_counter
 from threading import RLock
+from pathlib import Path
 
 from application.jobs import JobScheduler
 from application.plans import PlanService
@@ -21,7 +22,7 @@ from core.models import (
     Project, ProjectAnalysis, RecommendationResult, RenderResult, SearchRequest,
     SubtitleStyle, Transcript, VideoAnalysis, VideoAsset, new_id, utc_now,
 )
-from processing.files import save_upload, write_srt
+from processing.files import save_upload, validate_upload, write_srt
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,28 @@ class ApplicationService:
 
     def get_project(self, project_id: str) -> Project:
         return self.store.project(project_id)
+
+    def upload_and_prepare(self, filename: str, contents: bytes) -> tuple[VideoAsset, JobStatus]:
+        """Accept one upload and enqueue the existing preparation pipeline."""
+        validate_upload(filename, contents)
+        project = Project(id=new_id(), title=Path(filename).stem)
+        try:
+            self.store.save_project(project)
+            video = self.add_video(project.id, filename, contents)
+            job = self.submit_prepare_video(project.id, video.id)
+            return video, job
+        except Exception as exc:
+            try:
+                self.store.discard_upload_project(project.id)
+            except OSError:
+                logger.exception("업로드 실패 후 임시 프로젝트 정리 실패: %s", project.id)
+            if isinstance(exc, AppError):
+                raise
+            raise AppError(ErrorCode.STORAGE_FAILED, "영상 저장 또는 작업 접수에 실패했습니다.") from exc
+
+    def get_video_by_id(self, video_id: str) -> VideoAsset:
+        video = self.store.video_by_id(video_id)
+        return self.get_video(video.project_id, video.id)
 
     def add_video(self, project_id: str, filename: str, contents: bytes) -> VideoAsset:
         """Store an MP4, probe duration and add its ID to the project."""

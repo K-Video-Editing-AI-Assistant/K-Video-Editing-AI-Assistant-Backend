@@ -6,6 +6,7 @@ Writes are atomic inside the current process; cross-process concurrent writes ar
 
 import os
 import re
+import shutil
 from pathlib import Path
 from threading import RLock
 from uuid import uuid4
@@ -17,6 +18,11 @@ from core.models import (
     EditPlan, ProcessedTranscript, Project, ProjectAnalysis, RecommendationResult,
     RenderResult, SearchRequest, Transcript, VideoAnalysis, VideoAsset,
 )
+
+
+class VideoLocation(BaseModel):
+    video_id: str
+    project_id: str
 
 
 class ProjectStore:
@@ -81,6 +87,26 @@ class ProjectStore:
     def save_video(self, video: VideoAsset) -> None:
         with self.lock:
             self._write(self.video_dir(video.project_id, video.id) / "video.json", video)
+            self._write(self.root.parent / "videos" / f"{video.id}.json",
+                        VideoLocation(video_id=video.id, project_id=video.project_id))
+
+    def video_by_id(self, video_id: str) -> VideoAsset:
+        self._check_id(video_id)
+        with self.lock:
+            location = self._read(self.root.parent / "videos" / f"{video_id}.json", VideoLocation)
+            if location.video_id != video_id:
+                raise AppError(ErrorCode.INVALID_REFERENCE, "영상 ID가 일치하지 않습니다.")
+            return self.video(location.project_id, video_id)
+
+    def discard_upload_project(self, project_id: str) -> None:
+        """Roll back a newly created upload project before job acceptance only."""
+        with self.lock:
+            folder = self.project_dir(project_id)
+            for directory in (folder / "videos").glob("*"):
+                self._check_id(directory.name)
+                (self.root.parent / "videos" / f"{directory.name}.json").unlink(missing_ok=True)
+            if folder.exists():
+                shutil.rmtree(folder)
 
     def video(self, project_id: str, video_id: str) -> VideoAsset:
         with self.lock:

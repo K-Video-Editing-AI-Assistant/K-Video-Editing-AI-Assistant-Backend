@@ -2,9 +2,42 @@
 
 > **현재 개발 방향: React 프론트엔드 + FastAPI 백엔드.** 아래 Streamlit 직접 호출 설명은 기존 테스트용 구조입니다.
 
-> **별도 HTTP 서버(FastAPI 등)를 사용하지 않습니다.** Streamlit 화면에서 같은 Python 프로세스의 `ApplicationService`를 직접 호출합니다. 이 서비스 계층을 맡는 팀원의 공식 역할명은 **Application 담당**입니다.
+> FastAPI와 기존 Streamlit 테스트 화면은 같은 `ApplicationService`를 사용합니다.
 
-> 실제 Whisper·LLM 분석은 아직 미구현이며, 기본 동작은 **Stub(테스트용 결과)** 입니다. 화면은 개발 검증용 최소 UI입니다.
+> 기본 동작은 **Stub(테스트용 결과)** 입니다. 실제 Whisper·Gemini 연결은 `.env`에서 선택합니다.
+
+## 영상 업로드 API
+
+```bash
+.venv/bin/python3 -m pip install -e ".[test]"
+.venv/bin/python3 -m uvicorn api.main:create_app --factory --app-dir src --host 127.0.0.1 --port 8000
+```
+
+새 터미널에서 MP4 한 개를 전송합니다. `Content-Type`의 boundary는 curl/브라우저가 자동 설정하도록 둡니다.
+
+```bash
+curl -i -X POST http://127.0.0.1:8000/api/videos \
+  -F 'file=@/Users/lje/Downloads/test_video1.mp4;type=video/mp4'
+```
+
+`POST /api/videos`는 `multipart/form-data`의 `file` 필드로 최대 250MiB MP4 한 개를 받습니다. 프로젝트는 서버가 생성하며 FFprobe 검사·저장·작업 접수 후 `202 Accepted`를 반환합니다.
+
+```json
+{"success":true,"data":{"videoId":"<영상 ID>","jobId":"<작업 ID>"},"error":null}
+```
+
+기존 작업자가 자막 추출 → 전처리 → 영상 요약·주제 분석을 실행합니다. 실제 AI 사용 설정은 `TRANSCRIBER_BACKEND=whisper`, `PREPROCESSOR_BACKEND=ai`, `ANALYZER_BACKEND=llm`이며 Gemini 키 등 제공자 설정도 필요합니다. 처리 완료를 기다리지 않고 응답하고, 접수 이후 AI 실패는 작업 JSON에 `failed`로 기록합니다. 프로젝트 전체 키워드·추천·렌더링은 이 요청에서 실행하지 않습니다.
+
+| HTTP 상태 | 의미 |
+| --- | --- |
+| 400 | 파일 누락·빈 파일·다중 파일·유효하지 않은 영상/요청 |
+| 413 | 파일 크기 제한 초과 |
+| 415 | MP4 이외 확장자 |
+| 500 | 파일 저장·작업 접수 실패 |
+
+응답은 기존 `success/data/error` 형식을 사용합니다. 작업 접수 전 실패 시 생성한 프로젝트와 영상 파일을 정리합니다. 원본·자막·분석은 `runtime/projects/<projectId>/videos/<videoId>/`, 작업 상태는 `runtime/jobs/<jobId>.json`, 영상 ID 조회용 인덱스는 `runtime/videos/<videoId>.json`에 저장합니다.
+
+Swagger는 `http://localhost:8000/docs`에서 확인합니다. 현재 구현 범위는 업로드·작업 시작이며, 작업 상태/전체 자막 조회 HTTP API와 인증은 아직 구현하지 않았습니다. 단일 서버 프로세스와 내부 작업자 한 개를 사용하므로 `--workers`를 늘리지 마세요. 개발 중 `--reload`로 재시작하면 실행 중 작업이 중단될 수 있습니다.
 
 ## 문서 바로가기
 

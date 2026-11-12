@@ -36,18 +36,26 @@ def probe_video(path: Path) -> tuple[int, bool]:
         raise AppError(ErrorCode.INVALID_INPUT, f"MP4/FFprobe 검사 실패: {exc}") from exc
 
 
+def validate_upload(filename: str, contents: bytes) -> None:
+    if not filename or Path(filename).name != filename or "\\" in filename:
+        raise AppError(ErrorCode.INVALID_INPUT, "파일 이름이 유효하지 않습니다.")
+    if not filename.lower().endswith(".mp4"):
+        raise AppError(ErrorCode.UNSUPPORTED_FILE_TYPE, "MP4 파일만 허용합니다.")
+    if len(contents) > MAX_UPLOAD_SIZE:
+        raise AppError(ErrorCode.UPLOAD_TOO_LARGE, "250MB 제한을 초과했습니다.")
+    if not contents:
+        raise AppError(ErrorCode.INVALID_INPUT, "빈 파일은 업로드할 수 없습니다.")
+
+
 def save_upload(project_id: str, filename: str, contents: bytes, root: Path) -> VideoAsset:
     """Persist one MP4 inside the project and return its immutable VideoAsset."""
-    if not filename or Path(filename).name != filename or not filename.lower().endswith(".mp4"):
-        raise AppError(ErrorCode.INVALID_INPUT, "MP4 파일 이름만 허용합니다.")
-    if not contents or len(contents) > MAX_UPLOAD_SIZE:
-        raise AppError(ErrorCode.INVALID_INPUT, "파일이 비었거나 250MB 제한을 초과했습니다.")
+    validate_upload(filename, contents)
     video_id = new_id()
     directory = root / "projects" / project_id / "videos" / video_id
     directory.mkdir(parents=True, exist_ok=False)
     path = directory / "source.mp4"
-    path.write_bytes(contents)
     try:
+        path.write_bytes(contents)
         duration, has_audio = probe_video(path)
     except Exception:
         shutil.rmtree(directory, ignore_errors=True)
