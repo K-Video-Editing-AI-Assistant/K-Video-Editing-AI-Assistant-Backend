@@ -222,6 +222,13 @@ class ApplicationService:
         self._require_video(project_id, video_id)
         return self.store.video_data(project_id, video_id, "transcript")
 
+    def get_transcript_by_video_id(self, video_id: str) -> Transcript:
+        """영상 ID로 저장된 원본 자막을 조회합니다. 음성 인식은 재실행하지 않습니다."""
+        video = self.get_video_by_id(video_id)
+        transcript = self.get_transcript(video.project_id, video.id)
+        self._validate_transcript(video, transcript)
+        return transcript
+
     def get_video_analysis(self, project_id: str, video_id: str) -> VideoAnalysis:
         self._require_video(project_id, video_id)
         return self.store.video_data(project_id, video_id, "analysis")
