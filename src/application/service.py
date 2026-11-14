@@ -13,6 +13,7 @@ from application.jobs import JobScheduler
 from application.plans import PlanService
 from application.storage import ProjectStore
 from core.errors import AppError, ErrorCode
+from core.recommendations import validate_and_limit_recommendation
 from core.interfaces import (
     ContentAnalyzer, ProjectAnalyzer, SegmentRecommender, TranscriptPreprocessor,
     Transcriber, VideoEditor,
@@ -262,6 +263,7 @@ class ApplicationService:
             if any(by_id[sid].end_ms <= clip.start_ms or by_id[sid].start_ms >= clip.end_ms
                    for sid in clip.source_segment_ids):
                 raise AppError(ErrorCode.INVALID_REFERENCE, "추천 시간과 근거 발언이 겹치지 않습니다.")
+        result = validate_and_limit_recommendation(request, result, transcripts)
         self.store.save_recommendation(request, result)
         return result
 
