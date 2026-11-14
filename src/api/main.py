@@ -11,6 +11,7 @@ from starlette.exceptions import HTTPException
 
 from api.exception_handlers import handle_app_error, handle_request_validation_error, handle_http_error
 from api.videos import router as videos_router
+from api.jobs import router as jobs_router
 from api.responses import ApiResponse
 from application.config import Settings
 from bootstrap import create_application
@@ -39,6 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_exception_handler(AppError, handle_app_error)
     app.add_exception_handler(HTTPException, handle_http_error)
     app.include_router(videos_router)
+    app.include_router(jobs_router)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
