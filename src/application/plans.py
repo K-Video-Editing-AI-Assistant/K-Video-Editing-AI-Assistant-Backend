@@ -2,7 +2,7 @@
 
 from core.errors import AppError, ErrorCode
 from core.models import (
-    ApprovedEditPlan, EditPlan, PlanClip, PlanStatus, Project,
+    ApprovedEditPlan, EditPlan, PlanClip, PlanStatus, PlanSubtitle, Project,
     RecommendationResult, SubtitleStyle, VideoAsset, new_id, utc_now,
 )
 
@@ -40,14 +40,19 @@ class PlanService:
     def revise(
         self, current: EditPlan, expected_version: int, clips: tuple[PlanClip, ...],
         project: Project, videos: tuple[VideoAsset, ...],
+        subtitles: tuple[PlanSubtitle, ...] | None = None,
     ) -> EditPlan:
         if current.status != PlanStatus.DRAFT or current.version != expected_version:
             raise AppError(ErrorCode.PLAN_CONFLICT, "수정 가능한 최신 초안이 아닙니다.")
         self.validate_clips(clips, videos, project)
-        return EditPlan.model_validate({
-            **current.model_dump(), "version": current.version + 1,
-            "clips": clips, "approved_at": None,
-        })
+        try:
+            return EditPlan.model_validate({
+                **current.model_dump(), "version": current.version + 1,
+                "clips": clips, "approved_at": None,
+                "subtitles": current.subtitles if subtitles is None else subtitles,
+            })
+        except ValueError as exc:
+            raise AppError(ErrorCode.INVALID_PLAN, "자막 시간이 편집 영상 길이를 벗어납니다.") from exc
 
     def approve(
         self, current: EditPlan, expected_version: int, project: Project,

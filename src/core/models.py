@@ -310,6 +310,12 @@ class PlanClip(TimeRange):
     )
 
 
+class PlanSubtitle(TimeRange):
+    """사용자가 편집한 최종 자막 한 줄. 시간은 결과 영상 기준(ms)입니다."""
+
+    text: str = Field(min_length=1, description="최종 자막 문장")
+
+
 class EditPlan(ContractModel):
     """사용자가 조정할 수 있는 계획. 수정 시 서비스가 새 버전을 저장합니다."""
 
@@ -320,6 +326,9 @@ class EditPlan(ContractModel):
     status: PlanStatus = PlanStatus.DRAFT
     clips: tuple[PlanClip, ...] = ()           # 목록 순서가 FFmpeg 렌더링 순서
     subtitle_style: SubtitleStyle = SubtitleStyle.BASIC
+    subtitles: tuple[PlanSubtitle, ...] | None = Field(
+        default=None, description="사용자 편집 자막(결과 영상 기준). None이면 Whisper 자막 사용"
+    )
     edit_mode: EditMode = EditMode.PRESERVE_ORDER
     created_at: datetime = Field(default_factory=utc_now)
     approved_at: datetime | None = None
@@ -337,6 +346,10 @@ class EditPlan(ContractModel):
                 raise ValueError("cannot approve an empty plan")
         elif self.approved_at is not None:
             raise ValueError("draft plan cannot have approved_at")
+        if self.subtitles:
+            total_ms = sum(clip.end_ms - clip.start_ms for clip in self.clips)
+            if any(subtitle.end_ms > total_ms for subtitle in self.subtitles):
+                raise ValueError("subtitle exceeds edited video length")
         return self
 
 
@@ -408,3 +421,4 @@ class JobStatus(ContractModel):
         if self.updated_at < self.created_at:
             raise ValueError("updated_at must not precede created_at")
         return self
+
