@@ -242,9 +242,22 @@ class ApplicationService:
         project = self.get_project(request.project_id)
         if not set(request.video_ids).issubset(project.video_ids):
             raise AppError(ErrorCode.INVALID_REFERENCE, "검색할 원본 영상 ID가 프로젝트에 없습니다.")
-        project_analysis = self.store.project_analysis(project.id)
         transcripts = tuple(self.get_transcript(project.id, vid) for vid in request.video_ids)
         analyses = tuple(self.get_video_analysis(project.id, vid) for vid in request.video_ids)
+        try:
+            project_analysis = self.store.project_analysis(project.id)
+            if not {a.id for a in analyses}.issubset(project_analysis.video_analysis_ids):
+                raise AppError(ErrorCode.NOT_FOUND, "프로젝트 분석 갱신 필요")
+        except AppError as exc:
+            if exc.code != ErrorCode.NOT_FOUND:
+                raise
+            # Upload prepares one video, without the project aggregation step.
+            # Aggregate saved analysis only; never repeat transcription/analysis.
+            project_analysis = self.project_analyzer.analyze_project(project, analyses)
+            if (project_analysis.project_id != project.id
+                    or project_analysis.video_analysis_ids != tuple(a.id for a in analyses)):
+                raise AppError(ErrorCode.INVALID_REFERENCE, "프로젝트 분석 참조가 올바르지 않습니다.")
+            self.store.save_project_analysis(project_analysis)
         result = self.recommender.recommend(request, transcripts, analyses, project_analysis)
         if (result.project_id != project.id or result.request_id != request.id
                 or result.project_analysis_id != project_analysis.id
@@ -269,6 +282,37 @@ class ApplicationService:
 
     def get_recommendation(self, project_id: str, recommendation_id: str) -> RecommendationResult:
         return self.store.recommendation(project_id, recommendation_id)
+
+    def submit_video_recommendation(
+        self, video_id: str, query: str, target_duration_ms: int, max_clips: int = 20,
+    ) -> JobStatus:
+        video = self.get_video_by_id(video_id)
+        try:
+            self.get_transcript(video.project_id, video.id)
+            self.get_video_analysis(video.project_id, video.id)
+        except AppError as exc:
+            if exc.code == ErrorCode.NOT_FOUND:
+                raise AppError(ErrorCode.NOT_READY, "영상 분석이 완료된 후 추천을 요청해주세요.") from exc
+            raise
+        search = SearchRequest(
+            id=new_id(), project_id=video.project_id, video_ids=(video.id,), query=query,
+            target_duration_ms=target_duration_ms, max_clips=max_clips,
+        )
+        return self.scheduler.submit(
+            JobKind.RECOMMEND, video.project_id, lambda: self.recommend(search).id,
+            video_id=video.id,
+        )
+
+    def get_video_recommendation(self, video_id: str, recommendation_id: str):
+        video = self.get_video_by_id(video_id)
+        result = self.get_recommendation(video.project_id, recommendation_id)
+        search = self.store.recommendation_request(video.project_id, result.request_id)
+        if (result.id != recommendation_id or result.project_id != video.project_id
+                or search.id != result.request_id or search.project_id != video.project_id
+                or search.video_ids != (video.id,)
+                or any(c.video_id != video.id for c in result.clips)):
+            raise AppError(ErrorCode.NOT_FOUND, "해당 영상의 추천 결과를 찾을 수 없습니다.")
+        return search, result
 
     def latest_recommendation(self, project_id: str) -> RecommendationResult:
         return self.store.latest_recommendation(project_id)
