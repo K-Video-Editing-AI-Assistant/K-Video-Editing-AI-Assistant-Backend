@@ -18,7 +18,7 @@ from core.interfaces import (
     Transcriber, VideoEditor,
 )
 from core.models import (
-    ApprovedEditPlan, EditPlan, JobKind, JobStatus, PlanClip, ProcessedTranscript,
+    ApprovedEditPlan, EditPlan, JobKind, JobStatus, PlanClip, PlanSubtitle, ProcessedTranscript,
     Project, ProjectAnalysis, RecommendationResult, RenderResult, SearchRequest,
     SubtitleStyle, Transcript, VideoAnalysis, VideoAsset, new_id, utc_now,
 )
@@ -290,14 +290,16 @@ class ApplicationService:
 
     def revise_plan(
         self, project_id: str, plan_id: str, expected_version: int,
-        clips: tuple[PlanClip, ...],
+        clips: tuple[PlanClip, ...], subtitles: tuple[PlanSubtitle, ...] | None = None,
     ) -> EditPlan:
         with self.lock:
             current = self.get_plan(project_id)
             if current.id != plan_id:
                 raise AppError(ErrorCode.PLAN_CONFLICT, "다른 편집 계획을 수정하려고 합니다.")
             project = self.get_project(project_id)
-            revised = self.plans.revise(current, expected_version, clips, project, self._videos(project))
+            revised = self.plans.revise(
+                current, expected_version, clips, project, self._videos(project), subtitles,
+            )
             self.store.save_plan(revised)
             return revised
 
@@ -366,3 +368,4 @@ class ApplicationService:
             close = getattr(component, "close", None)
             if callable(close):
                 close()
+
