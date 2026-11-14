@@ -247,7 +247,7 @@ class ApplicationService:
         result = self.recommender.recommend(request, transcripts, analyses, project_analysis)
         if (result.project_id != project.id or result.request_id != request.id
                 or result.project_analysis_id != project_analysis.id
-                or result.recommender_version != self.recommender.VERSION
+                or result.recommender_version not in self.recommender.result_versions
                 or len(result.clips) > request.max_clips):
             raise AppError(ErrorCode.INVALID_REFERENCE, "추천 결과 계약을 위반했습니다.")
         transcript_by_video = {item.video_id: item for item in transcripts}

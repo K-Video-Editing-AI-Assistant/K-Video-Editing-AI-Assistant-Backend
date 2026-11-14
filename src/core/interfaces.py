@@ -59,6 +59,11 @@ class ProjectAnalyzer(ABC):
 class SegmentRecommender(ABC):
     """AI 영상분석 담당: 사용자 요청에 맞는 다중 영상 구간을 선택합니다."""
 
+    @property
+    def result_versions(self) -> tuple[str, ...]:
+        """이 구현체가 반환할 수 있는 결과 버전 (폴백 포함)."""
+        return (self.VERSION,)
+
     @abstractmethod
     def recommend(
         self,
