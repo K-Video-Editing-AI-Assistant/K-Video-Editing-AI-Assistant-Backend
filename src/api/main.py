@@ -1,6 +1,8 @@
 """FastAPI entry point; business workflows remain in ApplicationService."""
 
 from contextlib import asynccontextmanager
+import shutil
+import subprocess
 from typing import Literal
 
 from fastapi import FastAPI
@@ -24,11 +26,25 @@ class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
 
 
+def ensure_media_tools() -> None:
+    """Provision media binaries when the hosting image does not include them."""
+    if shutil.which("ffmpeg") and shutil.which("ffprobe"):
+        return
+    import static_ffmpeg
+
+    static_ffmpeg.add_paths(weak=True)
+    for executable in ("ffmpeg", "ffprobe"):
+        subprocess.run(
+            [executable, "-version"], check=True, capture_output=True, timeout=30,
+        )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
+        ensure_media_tools()
         service = create_application(settings)
         app.state.application_service = service
         try:
