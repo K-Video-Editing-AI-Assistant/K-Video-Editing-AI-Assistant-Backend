@@ -390,6 +390,61 @@ class ApplicationService:
     def get_render_result(self, project_id: str) -> RenderResult:
         return self.store.render(project_id)
 
+    def submit_final_video(
+        self, video_id: str, recommendation_id: str,
+        ranges: tuple[tuple[int, int], ...], subtitle_style: SubtitleStyle,
+        subtitles: tuple[PlanSubtitle, ...] | None,
+    ) -> JobStatus:
+        """Capture final frontend edits; each job renders its own immutable plan."""
+        search, _ = self.get_video_recommendation(video_id, recommendation_id)
+        video = self.get_video_by_id(video_id)
+        clips = tuple(PlanClip(id=new_id(), video_id=video.id, start_ms=start, end_ms=end)
+                      for start, end in ranges)
+        self.plans.validate_clips(clips, (video,), self.get_project(video.project_id))
+        try:
+            plan = ApprovedEditPlan(
+                id=new_id(), project_id=search.project_id, recommendation_id=recommendation_id,
+                version=1, clips=clips, subtitle_style=subtitle_style,
+                subtitles=subtitles, approved_at=utc_now(),
+            )
+        except ValueError as exc:
+            raise AppError(ErrorCode.INVALID_PLAN, "구간 또는 자막 시간이 올바르지 않습니다.") from exc
+        transcript = self.get_transcript(video.project_id, video.id) if subtitles is None else None
+        self.store.save_plan(plan)
+
+        def generate() -> str:
+            self.scheduler.report_stage("rendering")
+            destination = self.store.output_path(video.project_id, plan)
+            result = self.editor.render((video,), (transcript,) if transcript is not None else (), plan, destination)
+            if (result.project_id != plan.project_id or result.plan_id != plan.id
+                    or result.plan_version != plan.version
+                    or result.used_clip_ids != tuple(c.id for c in clips)
+                    or result.renderer_version != self.editor.VERSION
+                    or result.output_path.resolve() != destination.resolve()):
+                raise AppError(ErrorCode.INVALID_REFERENCE, "영상 생성 결과가 요청과 일치하지 않습니다.")
+            if not destination.is_file() or destination.stat().st_size == 0:
+                raise AppError(ErrorCode.OUTPUT_INVALID, "영상 파일이 생성되지 않았습니다.")
+            self.store.save_render(result)
+            return result.id
+
+        return self.scheduler.submit(JobKind.RENDER, video.project_id, generate, video_id=video.id)
+
+    def get_video_render(self, video_id: str, render_id: str) -> RenderResult:
+        video = self.get_video_by_id(video_id)
+        result = self.store.render_by_id(video.project_id, render_id)
+        plan = self.store.approved_plan(video.project_id, result.plan_id, result.plan_version)
+        if (result.id != render_id or result.project_id != video.project_id
+                or plan.project_id != video.project_id
+                or any(c.video_id != video.id for c in plan.clips)
+                or result.used_clip_ids != tuple(c.id for c in plan.clips)):
+            raise AppError(ErrorCode.NOT_FOUND, "해당 영상의 생성 결과를 찾을 수 없습니다.")
+        expected = self.store.output_path(video.project_id, plan).resolve()
+        if result.output_path.resolve() != expected or not expected.is_relative_to(self.store.root.resolve()):
+            raise AppError(ErrorCode.INVALID_REFERENCE, "영상 파일 경로가 올바르지 않습니다.")
+        if not expected.is_file() or expected.stat().st_size == 0:
+            raise AppError(ErrorCode.NOT_FOUND, "생성된 영상 파일을 찾을 수 없습니다.")
+        return result
+
     def submit_prepare_video(self, project_id: str, video_id: str) -> JobStatus:
         self._require_video(project_id, video_id)
         return self.scheduler.submit(

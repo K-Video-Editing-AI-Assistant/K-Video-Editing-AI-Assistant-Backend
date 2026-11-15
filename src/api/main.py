@@ -13,6 +13,7 @@ from api.exception_handlers import handle_app_error, handle_request_validation_e
 from api.videos import router as videos_router
 from api.jobs import router as jobs_router
 from api.recommendations import router as recommendations_router
+from api.renders import router as renders_router
 from api.responses import ApiResponse
 from application.config import Settings
 from bootstrap import create_application
@@ -43,6 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(videos_router)
     app.include_router(jobs_router)
     app.include_router(recommendations_router)
+    app.include_router(renders_router)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
