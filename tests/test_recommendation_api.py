@@ -38,19 +38,18 @@ def recommendation_client(tmp_path):
 
 
 @pytest.mark.parametrize("query,count", [("탄소 흡수", 1), ("무관한검색어", 0)])
-def test_create_poll_and_get_recommendation(recommendation_client, query, count):
+def test_create_returns_result_directly_and_can_be_reloaded(recommendation_client, query, count):
     client, service, video = recommendation_client
     response = client.post(f"/api/videos/{video.id}/recommendations", json={
         "query": query, "targetDurationSeconds": 10,
     })
-    assert response.status_code == 202
-    job_id = response.json()["data"]["jobId"]
-    service.scheduler.futures[job_id].result(timeout=5)
-    status = client.get(f"/api/jobs/{job_id}").json()["data"]
-    assert status["state"] == "succeeded"
-    assert status["kind"] == "recommend" and status["videoId"] == video.id
+    assert response.status_code == 200
+    created = response.json()
+    assert "jobId" not in created["data"]
+    assert not service.scheduler.futures
     service.recommender.recommend = Mock(side_effect=AssertionError("조회 중 재추천"))
-    response = client.get(f'/api/videos/{video.id}/recommendations/{status["resultRef"]}')
+    response = client.get(f'/api/videos/{video.id}/recommendations/{created["data"]["recommendationId"]}')
+    assert response.json() == created
     assert response.status_code == 200
     data = response.json()["data"]
     assert data["query"] == query and data["targetDurationSeconds"] == 10
@@ -99,18 +98,17 @@ def test_lookup_errors(recommendation_client, video_id, rec_id, code):
     assert response.json()["success"] is False
 
 
-def test_recommender_failure_is_visible_in_job_status(recommendation_client):
+def test_recommender_failure_returns_common_error_directly(recommendation_client):
     client, service, video = recommendation_client
     service.recommender.recommend = Mock(side_effect=RuntimeError("private provider detail"))
     response = client.post(f"/api/videos/{video.id}/recommendations", json={
         "query": "탄소", "targetDurationSeconds": 60,
     })
-    assert response.status_code == 202
-    job_id = response.json()["data"]["jobId"]
-    service.scheduler.futures[job_id].result(timeout=5)
-    response = client.get(f"/api/jobs/{job_id}")
-    assert response.json()["data"]["state"] == "failed"
-    assert response.json()["data"]["resultRef"] is None
+    assert response.status_code == 500
+    assert response.json()["success"] is False
+    assert response.json()["data"] is None
+    assert response.json()["error"]["code"] == "recommendation_failed"
+    assert not service.scheduler.futures
     assert "private provider detail" not in response.text
 
 

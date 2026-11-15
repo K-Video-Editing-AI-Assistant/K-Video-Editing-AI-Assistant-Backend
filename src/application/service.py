@@ -283,9 +283,9 @@ class ApplicationService:
     def get_recommendation(self, project_id: str, recommendation_id: str) -> RecommendationResult:
         return self.store.recommendation(project_id, recommendation_id)
 
-    def submit_video_recommendation(
+    def create_video_recommendation(
         self, video_id: str, query: str, target_duration_ms: int, max_clips: int = 20,
-    ) -> JobStatus:
+    ) -> tuple[SearchRequest, RecommendationResult]:
         video = self.get_video_by_id(video_id)
         try:
             self.get_transcript(video.project_id, video.id)
@@ -298,10 +298,13 @@ class ApplicationService:
             id=new_id(), project_id=video.project_id, video_ids=(video.id,), query=query,
             target_duration_ms=target_duration_ms, max_clips=max_clips,
         )
-        return self.scheduler.submit(
-            JobKind.RECOMMEND, video.project_id, lambda: self.recommend(search).id,
-            video_id=video.id,
-        )
+        try:
+            return search, self.recommend(search)
+        except AppError:
+            raise
+        except Exception as exc:
+            logger.exception("추천 구간 생성 실패")
+            raise AppError(ErrorCode.RECOMMENDATION_FAILED, "추천 구간을 생성하지 못했습니다.") from exc
 
     def get_video_recommendation(self, video_id: str, recommendation_id: str):
         video = self.get_video_by_id(video_id)

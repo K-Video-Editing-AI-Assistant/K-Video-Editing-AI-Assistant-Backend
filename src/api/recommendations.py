@@ -1,10 +1,11 @@
-"""Asynchronous single-video recommendations for the segments screen."""
+"""Generate and return single-video recommendations for the segments screen."""
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api.responses import ApiResponse
 from core.errors import AppError, ErrorCode
+from core.models import SearchRequest, RecommendationResult
 
 router = APIRouter(tags=["recommendations"])
 
@@ -23,11 +24,6 @@ class RecommendationInput(BaseModel):
         if not value:
             raise ValueError("추천 요청을 입력해주세요.")
         return value
-
-
-class RecommendationAccepted(BaseModel):
-    videoId: str
-    jobId: str
 
 
 class RecommendationClipResponse(BaseModel):
@@ -50,23 +46,23 @@ class RecommendationResponse(BaseModel):
 
 
 @router.post(
-    "/api/videos/{videoId}/recommendations", status_code=202,
-    response_model=ApiResponse[RecommendationAccepted],
+    "/api/videos/{videoId}/recommendations",
+    response_model=ApiResponse[RecommendationResponse],
     responses={code: {"model": ApiResponse[None]} for code in (400, 404, 409, 422, 500)},
     summary="추천 구간 생성 요청",
     description="분석 완료 후 자연어 요청과 전체 목표 길이(정수 초)를 전달합니다. "
-                "jobId로 작업 상태를 조회하고 성공 시 resultRef를 recommendationId로 사용합니다. "
+                "생성이 완료되면 HTTP 200으로 추천 결과를 바로 반환하며 작업 상태 조회는 필요하지 않습니다. "
                 "추천 구간 합산 길이는 목표의 최대 110%이며, 관련 내용이 부족하면 짧거나 비어 있을 수 있습니다. "
                 "실제 영상 파일은 생성하지 않습니다.",
 )
 def create_recommendation(videoId: str, body: RecommendationInput, request: Request):
     try:
-        job = request.app.state.application_service.submit_video_recommendation(
+        search, result = request.app.state.application_service.create_video_recommendation(
             videoId, body.query, body.targetDurationSeconds * 1000, body.maxClips,
         )
     except (OSError, ValueError) as exc:
-        raise AppError(ErrorCode.STORAGE_FAILED, "추천 작업을 접수하지 못했습니다.") from exc
-    return ApiResponse.ok(RecommendationAccepted(videoId=videoId, jobId=job.id))
+        raise AppError(ErrorCode.STORAGE_FAILED, "추천 데이터를 처리하지 못했습니다.") from exc
+    return ApiResponse.ok(_recommendation_response(videoId, search, result))
 
 
 @router.get(
@@ -74,7 +70,7 @@ def create_recommendation(videoId: str, body: RecommendationInput, request: Requ
     response_model=ApiResponse[RecommendationResponse],
     responses={code: {"model": ApiResponse[None]} for code in (400, 404, 500)},
     summary="추천 구간 결과 조회",
-    description="성공한 추천 작업의 resultRef로 저장된 결과를 조회합니다. 시간 단위는 초입니다. "
+    description="생성 응답의 recommendationId로 저장된 결과를 다시 조회합니다. 시간 단위는 초입니다. "
                 "빈 clips는 정상적인 빈 추천이며, 조회 시 AI 처리를 재실행하지 않습니다.",
 )
 def get_recommendation(videoId: str, recommendationId: str, request: Request):
@@ -82,7 +78,13 @@ def get_recommendation(videoId: str, recommendationId: str, request: Request):
         search, result = request.app.state.application_service.get_video_recommendation(videoId, recommendationId)
     except (OSError, ValueError) as exc:
         raise AppError(ErrorCode.STORAGE_FAILED, "추천 결과를 읽지 못했습니다.") from exc
-    return ApiResponse.ok(RecommendationResponse(
+    return ApiResponse.ok(_recommendation_response(videoId, search, result))
+
+
+def _recommendation_response(
+    videoId: str, search: SearchRequest, result: RecommendationResult,
+) -> RecommendationResponse:
+    return RecommendationResponse(
         recommendationId=result.id, videoId=videoId, query=search.query,
         targetDurationSeconds=search.target_duration_ms / 1000 if search.target_duration_ms is not None else None,
         totalDurationSeconds=sum(c.end_ms - c.start_ms for c in result.clips) / 1000,
@@ -91,4 +93,4 @@ def get_recommendation(videoId: str, recommendationId: str, request: Request):
         clips=[RecommendationClipResponse(clipId=c.id, startSeconds=c.start_ms / 1000,
                                           endSeconds=c.end_ms / 1000, reason=c.reason)
                for c in result.clips],
-    ))
+    )
