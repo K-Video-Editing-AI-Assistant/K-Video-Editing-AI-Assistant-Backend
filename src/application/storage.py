@@ -153,6 +153,11 @@ class ProjectStore:
             return self._read(self.project_dir(project_id) / "recommendations" /
                               f"{recommendation_id}.json", RecommendationResult)
 
+    def recommendation_request(self, project_id: str, request_id: str) -> SearchRequest:
+        self._check_id(request_id)
+        return self._read(self.project_dir(project_id) / "recommendations" /
+                          f"{request_id}_request.json", SearchRequest)
+
     def latest_recommendation(self, project_id: str) -> RecommendationResult:
         return self._read(self.project_dir(project_id) / "latest_recommendation.json", RecommendationResult)
 

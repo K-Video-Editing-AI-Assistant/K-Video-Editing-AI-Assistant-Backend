@@ -14,6 +14,7 @@ class ErrorCode(str, Enum):
     UPLOAD_TOO_LARGE = "upload_too_large"
     UNSUPPORTED_FILE_TYPE = "unsupported_file_type"
     NOT_FOUND = "not_found"                   # 대상 프로젝트/영상/결과 없음
+    NOT_READY = "not_ready"                   # 선행 영상 분석 미완료
     INVALID_REFERENCE = "invalid_reference"   # 다른 객체를 가리키는 ID가 잘못됨
     INVALID_PLAN = "invalid_plan"             # 편집 구간·승인 조건 위반
     PLAN_CONFLICT = "plan_conflict"           # 오래된 계획 버전으로 수정 시도

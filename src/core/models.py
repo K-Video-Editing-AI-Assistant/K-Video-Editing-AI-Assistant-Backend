@@ -230,6 +230,7 @@ class SearchRequest(ContractModel):
     video_ids: tuple[str, ...] = Field(min_length=1, description="요청에서 검색할 원본 영상 ID")
     query: str = Field(min_length=1, description="사용자 자연어 요청")
     max_clips: int = Field(default=5, ge=1, le=20, strict=True, description="최대 추천 구간 수")
+    target_duration_ms: int | None = Field(default=None, gt=0, strict=True, description="전체 추천 구간의 목표 합산 길이(ms). 발언 경계에 따라 실제 길이는 달라질 수 있습니다.")
     edit_mode: EditMode = EditMode.PRESERVE_ORDER
     created_at: datetime = Field(default_factory=utc_now)
 
