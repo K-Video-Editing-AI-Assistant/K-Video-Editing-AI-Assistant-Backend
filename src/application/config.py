@@ -21,7 +21,11 @@ class Settings(BaseModel):
     project_analyzer_backend: str = "stub"
     recommender_backend: str = "stub"
     editor_backend: str = "stub"
-    cors_origins: tuple[str, ...] = ("http://localhost:5173", "http://localhost:3000")
+    cors_origins: tuple[str, ...] = (
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://k-video-editing-ai-assistant-fronte.vercel.app",
+    )
 
     @field_validator("cors_origins", mode="before")
     @classmethod
