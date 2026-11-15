@@ -19,6 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+deploy = ["fastapi[standard]>=0.115,<1"]
 test = ["pytest>=8,<10", "httpx>=0.27,<1"]
 
 [tool.setuptools]
