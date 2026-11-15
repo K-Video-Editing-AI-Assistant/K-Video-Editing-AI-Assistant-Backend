@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "ai-video-assistant"
 version = "1.2.0"
 description = "AI 영상편집 어시스턴트 multi-video single-process Python application skeleton"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "fastapi>=0.115,<1",
     "uvicorn>=0.30,<1",
