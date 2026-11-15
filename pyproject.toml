@@ -16,6 +16,7 @@ dependencies = [
     "streamlit>=1.40,<2",
     "faster-whisper>=1.0",
     "google-genai>=1,<2",
+    "static-ffmpeg==3.0",
 ]
 
 [project.optional-dependencies]
