@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from core.errors import AppError, ErrorCode
 from core.models import (
-    EditPlan, ProcessedTranscript, Project, ProjectAnalysis, RecommendationResult,
+    ApprovedEditPlan, EditPlan, ProcessedTranscript, Project, ProjectAnalysis, RecommendationResult,
     RenderResult, SearchRequest, Transcript, VideoAnalysis, VideoAsset,
 )
 
@@ -175,7 +175,17 @@ class ProjectStore:
 
     def save_render(self, result: RenderResult) -> None:
         with self.lock:
+            self._write(self.project_dir(result.project_id) / "renders" / f"{result.id}.json", result)
             self._write(self.project_dir(result.project_id) / "latest_render.json", result)
+
+    def render_by_id(self, project_id: str, render_id: str) -> RenderResult:
+        self._check_id(render_id)
+        return self._read(self.project_dir(project_id) / "renders" / f"{render_id}.json", RenderResult)
+
+    def approved_plan(self, project_id: str, plan_id: str, version: int) -> ApprovedEditPlan:
+        self._check_id(plan_id)
+        return self._read(self.project_dir(project_id) / "plans" /
+                          f"{plan_id}_v{version}_approved.json", ApprovedEditPlan)
 
     def render(self, project_id: str) -> RenderResult:
         with self.lock:
