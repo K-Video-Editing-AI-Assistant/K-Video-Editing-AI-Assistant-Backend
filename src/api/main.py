@@ -64,6 +64,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(settings.cors_origins),
+        # Vercel truncates the project name in generated preview hostnames.
+        allow_origin_regex=(
+            r"^https://k-video-editing-ai-assistant-(?:fron|fronte|frontend)-"
+            r"[a-z0-9]+(?:-[a-z0-9]+)*-wldmsdl7s-projects\.vercel\.app$"
+        ),
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["Content-Type", "Authorization"],
     )
