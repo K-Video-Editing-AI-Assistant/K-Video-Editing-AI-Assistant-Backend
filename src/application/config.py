@@ -25,6 +25,7 @@ class Settings(BaseModel):
         "http://localhost:5173",
         "http://localhost:3000",
         "https://k-video-editing-ai-assistant-fronte.vercel.app",
+        "https://k-video-editing-ai-assistant-fron-git-f6c804-wldmsdl7s-projects.vercel.app",
     )
 
     @field_validator("cors_origins", mode="before")
