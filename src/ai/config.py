@@ -46,6 +46,13 @@ class AISettings:
     preprocessing_batch_segments: int = 16
     preprocessing_batch_characters: int = 6000
     gemini_timeout_seconds: int = 300
+    analysis_parallel_enabled: bool = False
+    analysis_concurrency: int = 3
+    analysis_batch_segments: int = 64
+    analysis_batch_characters: int = 12000
+    analysis_overlap_segments: int = 3
+    analysis_parallel_threshold: int = 96
+    analysis_parallel_threshold_characters: int = 24000
 
     def __post_init__(self) -> None:
         if not isinstance(self.provider, AIProvider):
@@ -66,6 +73,20 @@ class AISettings:
         ):
             if type(value) is not int or not 1 <= value <= upper:
                 raise ValueError(f"{name}은 1~{upper} 정수여야 합니다.")
+        if type(self.analysis_parallel_enabled) is not bool:
+            raise ValueError("ANALYSIS_PARALLEL_ENABLED must be boolean")
+        for name, value, lower, upper in (
+            ("ANALYSIS_CONCURRENCY", self.analysis_concurrency, 1, 8),
+            ("ANALYSIS_BATCH_SEGMENTS", self.analysis_batch_segments, 2, 512),
+            ("ANALYSIS_BATCH_CHARACTERS", self.analysis_batch_characters, 1000, 40000),
+            ("ANALYSIS_OVERLAP_SEGMENTS", self.analysis_overlap_segments, 0, 32),
+            ("ANALYSIS_PARALLEL_THRESHOLD", self.analysis_parallel_threshold, 2, 10000),
+            ("ANALYSIS_PARALLEL_THRESHOLD_CHARACTERS", self.analysis_parallel_threshold_characters, 1000, 70000),
+        ):
+            if type(value) is not int or not lower <= value <= upper:
+                raise ValueError(f"{name}: expected integer {lower}~{upper}")
+        if self.analysis_overlap_segments >= self.analysis_batch_segments:
+            raise ValueError("ANALYSIS_OVERLAP_SEGMENTS must be smaller than ANALYSIS_BATCH_SEGMENTS")
         if not self.gemini_model.strip():
             raise ValueError("gemini_model은 비어 있을 수 없습니다.")
 
@@ -88,6 +109,10 @@ class AISettings:
         except ValueError as exc:
             raise ValueError("AI_PROVIDER 또는 AI_FALLBACK 설정값이 올바르지 않습니다.") from exc
 
+        parallel = (read("ANALYSIS_PARALLEL_ENABLED") or "false").lower()
+        if parallel not in {"true", "false", "1", "0"}:
+            raise ValueError("ANALYSIS_PARALLEL_ENABLED must be true/false or 1/0")
+
         return cls(
             provider=provider,
             fallback=fallback,
@@ -100,4 +125,11 @@ class AISettings:
             preprocessing_batch_segments=int(read("PREPROCESSING_BATCH_SEGMENTS") or cls.preprocessing_batch_segments),
             preprocessing_batch_characters=int(read("PREPROCESSING_BATCH_CHARACTERS") or cls.preprocessing_batch_characters),
             gemini_timeout_seconds=int(read("GEMINI_TIMEOUT_SECONDS") or cls.gemini_timeout_seconds),
+            analysis_parallel_enabled=parallel in {"true", "1"},
+            analysis_concurrency=int(read("ANALYSIS_CONCURRENCY") or cls.analysis_concurrency),
+            analysis_batch_segments=int(read("ANALYSIS_BATCH_SEGMENTS") or cls.analysis_batch_segments),
+            analysis_batch_characters=int(read("ANALYSIS_BATCH_CHARACTERS") or cls.analysis_batch_characters),
+            analysis_overlap_segments=int(read("ANALYSIS_OVERLAP_SEGMENTS") or cls.analysis_overlap_segments),
+            analysis_parallel_threshold=int(read("ANALYSIS_PARALLEL_THRESHOLD") or cls.analysis_parallel_threshold),
+            analysis_parallel_threshold_characters=int(read("ANALYSIS_PARALLEL_THRESHOLD_CHARACTERS") or cls.analysis_parallel_threshold_characters),
         )
