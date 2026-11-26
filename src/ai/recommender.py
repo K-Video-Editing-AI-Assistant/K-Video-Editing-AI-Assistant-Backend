@@ -8,6 +8,7 @@ import json
 import logging
 import re
 from typing import Any
+from time import perf_counter
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -19,6 +20,7 @@ from core.models import (
 )
 
 from ai.config import AIFallbackPolicy, AIProvider, AISettings
+from ai.long_recommendation import LongRecommendation
 from ai.providers.gemini import GeminiProcessingError, GeminiStructuredGenerator
 
 
@@ -55,6 +57,7 @@ class LLMSegmentRecommender(SegmentRecommender):
     VERSION = "rule-based-recommender-v1"
     GEMINI_VERSION = "gemini-recommender-v1"
     FALLBACK_VERSION = "rule-based-recommender-v1:gemini-fallback"
+    LONG_VERSION = "gemini-recommender-long-v1"
     _STOPWORDS = {
         "구간", "장면", "영상", "관련", "부분", "내용", "모아줘", "찾아줘", "보여줘",
         "해줘", "설명", "하는", "있는", "대한", "모든", "그리고", "추출", "추천",
@@ -68,7 +71,8 @@ class LLMSegmentRecommender(SegmentRecommender):
 
     @property
     def result_versions(self) -> tuple[str, ...]:
-        return (self.VERSION, self.FALLBACK_VERSION, f"{self.GEMINI_VERSION}:{self.settings.gemini_model}")
+        return (self.VERSION, self.FALLBACK_VERSION, f"{self.GEMINI_VERSION}:{self.settings.gemini_model}",
+                f"{self.LONG_VERSION}:{self.settings.gemini_model}")
 
     @staticmethod
     def _validate(
@@ -274,15 +278,29 @@ class LLMSegmentRecommender(SegmentRecommender):
 
         generator = GeminiStructuredGenerator(
             self.settings.gemini_api_key, self.settings.gemini_model, self.gemini_client,
+            timeout_seconds=self.settings.gemini_timeout_seconds,
         )
+        started = perf_counter()
         try:
-            response = generator.generate(
-                self._prompt(request, by_transcript, by_analysis), _GeminiRecommendation,
-                omit_array_bounds=True,
-            )
-            return self._from_gemini(request, by_transcript, project_analysis, response, self.settings.gemini_model)
+            prompt = self._prompt(request, by_transcript, by_analysis)
+            logger.info("Gemini 추천 시작 — 입력 %d자 / 제한 %d자", len(prompt), generator.MAX_PROMPT_CHARS)
+            oversized = len(prompt) > generator.MAX_PROMPT_CHARS
+            if oversized:
+                instructions = prompt.split("\n입력 JSON:\n", 1)[0]
+                response = LongRecommendation(
+                    request, by_transcript, by_analysis, instructions, generator, _GeminiRecommendation,
+                ).recommend()
+            else:
+                response = generator.generate(prompt, _GeminiRecommendation, omit_array_bounds=True)
+            result = self._from_gemini(request, by_transcript, project_analysis, response, self.settings.gemini_model)
+            if oversized:
+                result = result.model_copy(update={"recommender_version": f"{self.LONG_VERSION}:{self.settings.gemini_model}"})
+            logger.info("Gemini 추천 완료 — %.3f초", perf_counter() - started)
+            return result
         except (GeminiProcessingError, ValueError) as exc:
             if self.settings.fallback == AIFallbackPolicy.RULE_BASED:
                 logger.warning("Gemini 자연어 추천 실패로 규칙 기반 결과를 사용합니다 (%s).", type(exc).__name__)
                 return baseline.model_copy(update={"recommender_version": self.FALLBACK_VERSION})
             raise AppError(ErrorCode.RECOMMENDATION_FAILED, "Gemini 자연어 클립 추천에 실패했습니다.", retryable=True) from exc
+        finally:
+            generator.close()
