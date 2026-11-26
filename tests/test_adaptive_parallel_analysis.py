@@ -108,3 +108,87 @@ def test_cache_version_changes_when_parallel_enabled():
     assert LLMContentAnalyzer(settings()).cache_version != LLMContentAnalyzer(
         settings(analysis_parallel_enabled=False)
     ).cache_version
+
+
+class TemporaryServiceError(Exception):
+    code = 503
+
+
+class RecoveryModels(FakeModels):
+    def __init__(self, fail_reduce=0, fail_map=0):
+        super().__init__()
+        self.fail_reduce = fail_reduce
+        self.fail_map = fail_map
+        self.attempts = []
+
+    def generate_content(self, *, model, contents, config):
+        payload = json.loads(contents.split("입력 JSON:\n", 1)[1])
+        stage = "reduce" if isinstance(payload, list) else (
+            "map" if "target_segments" in payload else "single"
+        )
+        self.attempts.append((stage, config.get("thinking_config", {}).get("thinking_level")))
+        if stage == "reduce" and self.fail_reduce:
+            self.fail_reduce -= 1
+            raise TemporaryServiceError()
+        if stage == "map" and self.fail_map:
+            self.fail_map -= 1
+            raise TemporaryServiceError()
+        return super().generate_content(model=model, contents=contents, config=config)
+
+
+def test_reduce_retry_does_not_repeat_maps(monkeypatch):
+    monkeypatch.setattr("ai.analysis_recovery.sleep", lambda _: None)
+    models = RecoveryModels(fail_reduce=1)
+    analyzer = LLMContentAnalyzer(
+        settings(analysis_concurrency=1), SimpleNamespace(models=models),
+    )
+    result = analyzer.analyze(transcript())
+    assert result.summary
+    assert models.attempts == [("map", "LOW")] * 3 + [("reduce", "MEDIUM")] * 2
+
+
+def test_map_retry_is_local(monkeypatch):
+    monkeypatch.setattr("ai.analysis_recovery.sleep", lambda _: None)
+    models = RecoveryModels(fail_map=1)
+    analyzer = LLMContentAnalyzer(
+        settings(analysis_concurrency=1), SimpleNamespace(models=models),
+    )
+    assert analyzer.analyze(transcript()).summary
+    assert models.attempts == [("map", "LOW")] * 4 + [("reduce", "MEDIUM")]
+
+
+def test_cached_maps_survive_failed_reduce(tmp_path):
+    s = settings(analysis_cache_dir=tmp_path, analysis_reduce_max_retries=0)
+    first = RecoveryModels(fail_reduce=1)
+    with pytest.raises(AppError):
+        LLMContentAnalyzer(s, SimpleNamespace(models=first)).analyze(transcript())
+    assert len(list(tmp_path.rglob("*.json"))) == 3
+    second = RecoveryModels()
+    result = LLMContentAnalyzer(s, SimpleNamespace(models=second)).analyze(transcript())
+    assert second.attempts == [("reduce", "MEDIUM")]
+    assert result.topics[0].source_segment_ids == ("raw-0", "raw-3", "raw-6")
+
+
+def test_cache_invalidated_by_map_thinking_and_corruption(tmp_path):
+    s = settings(analysis_cache_dir=tmp_path)
+    LLMContentAnalyzer(s, SimpleNamespace(models=FakeModels())).analyze(transcript())
+    files = list(tmp_path.rglob("*.json"))
+    assert len(files) == 3
+    files[0].write_text("broken json", encoding="utf-8")
+    models = FakeModels()
+    LLMContentAnalyzer(s, SimpleNamespace(models=models)).analyze(transcript())
+    assert models.calls.count("map") == 1
+    other = FakeModels()
+    LLMContentAnalyzer(
+        replace(s, analysis_map_thinking_level="medium"), SimpleNamespace(models=other),
+    ).analyze(transcript())
+    assert other.calls.count("map") == 3
+
+
+def test_disabled_cache_recomputes_maps(tmp_path):
+    s = settings(analysis_cache_dir=tmp_path, analysis_cache_enabled=False)
+    for _ in range(2):
+        models = FakeModels()
+        LLMContentAnalyzer(s, SimpleNamespace(models=models)).analyze(transcript())
+        assert models.calls.count("map") == 3
+    assert not list(tmp_path.rglob("*.json"))
