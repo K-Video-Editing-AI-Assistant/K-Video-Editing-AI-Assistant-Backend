@@ -84,7 +84,8 @@ class LLMContentAnalyzer(ContentAnalyzer):
             version = f"{self.GEMINI_VERSION}:{self.settings.gemini_model}:{self.settings.analysis_thinking_level}"
             if self.settings.analysis_parallel_enabled:
                 s = self.settings
-                version += (f":parallel-v1:{s.analysis_batch_segments}:{s.analysis_batch_characters}"
+                version += (f":parallel-v2:{s.analysis_map_thinking_level}:{s.analysis_reduce_thinking_level}:"
+                            f"{s.analysis_batch_segments}:{s.analysis_batch_characters}"
                             f":{s.analysis_overlap_segments}:{s.analysis_parallel_threshold}"
                             f":{s.analysis_parallel_threshold_characters}")
             return version
@@ -176,13 +177,6 @@ class LLMContentAnalyzer(ContentAnalyzer):
         if self.settings.provider != AIProvider.GEMINI:
             raise AppError(ErrorCode.INVALID_INPUT, f"AI 제공자 '{self.settings.provider.value}'는 아직 구현되지 않았습니다.")
 
-        if self._generator is None:
-            self._generator = GeminiStructuredGenerator(
-                self.settings.gemini_api_key, self.settings.gemini_model, self.gemini_client,
-                thinking_level=self.settings.analysis_thinking_level,
-                timeout_seconds=self.settings.gemini_timeout_seconds,
-            )
-        generator = self._generator
         try:
             started = perf_counter()
             prompt = self._prompt(transcript)
@@ -195,12 +189,18 @@ class LLMContentAnalyzer(ContentAnalyzer):
                 chunks = split_chunks(transcript, s)
             if len(chunks) > 1:
                 response = analyze_parallel(
-                    transcript, chunks, s, generator, _GeminiVideoAnalysis, self.gemini_client,
+                    transcript, chunks, s, _GeminiVideoAnalysis, self.gemini_client,
                 )
             else:
+                if self._generator is None:
+                    self._generator = GeminiStructuredGenerator(
+                        s.gemini_api_key, s.gemini_model, self.gemini_client,
+                        thinking_level=s.analysis_thinking_level,
+                        timeout_seconds=s.gemini_timeout_seconds,
+                    )
                 logger.info("Gemini 단일 분석 시작 — 자막 %d개, 입력 %d자",
                             len(transcript.segments), len(prompt))
-                response = generator.generate(prompt, _GeminiVideoAnalysis)
+                response = self._generator.generate(prompt, _GeminiVideoAnalysis)
             logger.info("Gemini 분석 응답 완료 — %.3f초", perf_counter() - started)
             return self._from_gemini(transcript, response, self.settings.gemini_model).model_copy(
                 update={"analyzer_version": self.cache_version},
