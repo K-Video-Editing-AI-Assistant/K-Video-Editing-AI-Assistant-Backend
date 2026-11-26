@@ -53,6 +53,16 @@ class AISettings:
     analysis_overlap_segments: int = 3
     analysis_parallel_threshold: int = 96
     analysis_parallel_threshold_characters: int = 24000
+    analysis_map_thinking_level: str = "low"
+    analysis_reduce_thinking_level: str = "medium"
+    analysis_map_timeout_seconds: int = 120
+    analysis_reduce_timeout_seconds: int = 120
+    analysis_map_max_retries: int = 2
+    analysis_reduce_max_retries: int = 2
+    analysis_retry_base_delay_seconds: int = 2
+    analysis_retry_max_delay_seconds: int = 15
+    analysis_cache_enabled: bool = True
+    analysis_cache_dir: Path | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.provider, AIProvider):
@@ -63,7 +73,8 @@ class AISettings:
             raise ValueError("PREPROCESSING_CONCURRENCY는 1~8 정수여야 합니다.")
         if type(self.preprocessing_max_retries) is not int or not 0 <= self.preprocessing_max_retries <= 5:
             raise ValueError("PREPROCESSING_MAX_RETRIES는 0~5 정수여야 합니다.")
-        for level in (self.preprocessing_thinking_level, self.analysis_thinking_level):
+        for level in (self.preprocessing_thinking_level, self.analysis_thinking_level,
+                      self.analysis_map_thinking_level, self.analysis_reduce_thinking_level):
             if level not in {"default", "low", "medium", "high"}:
                 raise ValueError("thinking level은 default/low/medium/high 중 하나여야 합니다.")
         for name, value, upper in (
@@ -75,7 +86,17 @@ class AISettings:
                 raise ValueError(f"{name}은 1~{upper} 정수여야 합니다.")
         if type(self.analysis_parallel_enabled) is not bool:
             raise ValueError("ANALYSIS_PARALLEL_ENABLED must be boolean")
+        if type(self.analysis_cache_enabled) is not bool:
+            raise ValueError("ANALYSIS_CACHE_ENABLED must be boolean")
+        if self.analysis_cache_dir is not None and not isinstance(self.analysis_cache_dir, Path):
+            raise ValueError("analysis_cache_dir must be a Path")
         for name, value, lower, upper in (
+            ("ANALYSIS_MAP_TIMEOUT_SECONDS", self.analysis_map_timeout_seconds, 1, 600),
+            ("ANALYSIS_REDUCE_TIMEOUT_SECONDS", self.analysis_reduce_timeout_seconds, 1, 600),
+            ("ANALYSIS_MAP_MAX_RETRIES", self.analysis_map_max_retries, 0, 5),
+            ("ANALYSIS_REDUCE_MAX_RETRIES", self.analysis_reduce_max_retries, 0, 5),
+            ("ANALYSIS_RETRY_BASE_DELAY_SECONDS", self.analysis_retry_base_delay_seconds, 1, 60),
+            ("ANALYSIS_RETRY_MAX_DELAY_SECONDS", self.analysis_retry_max_delay_seconds, 1, 120),
             ("ANALYSIS_CONCURRENCY", self.analysis_concurrency, 1, 8),
             ("ANALYSIS_BATCH_SEGMENTS", self.analysis_batch_segments, 2, 512),
             ("ANALYSIS_BATCH_CHARACTERS", self.analysis_batch_characters, 1000, 40000),
@@ -85,6 +106,8 @@ class AISettings:
         ):
             if type(value) is not int or not lower <= value <= upper:
                 raise ValueError(f"{name}: expected integer {lower}~{upper}")
+        if self.analysis_retry_base_delay_seconds > self.analysis_retry_max_delay_seconds:
+            raise ValueError("retry base delay must not exceed max delay")
         if self.analysis_overlap_segments >= self.analysis_batch_segments:
             raise ValueError("ANALYSIS_OVERLAP_SEGMENTS must be smaller than ANALYSIS_BATCH_SEGMENTS")
         if not self.gemini_model.strip():
@@ -113,6 +136,12 @@ class AISettings:
         if parallel not in {"true", "false", "1", "0"}:
             raise ValueError("ANALYSIS_PARALLEL_ENABLED must be true/false or 1/0")
 
+        cache_enabled = (read("ANALYSIS_CACHE_ENABLED") or "true").lower()
+        if cache_enabled not in {"true", "false", "1", "0"}:
+            raise ValueError("ANALYSIS_CACHE_ENABLED must be true/false or 1/0")
+        runtime_dir = Path(read("RUNTIME_DIR") or "runtime")
+        cache_dir = (PROJECT_ROOT / runtime_dir / "analysis_cache").resolve()
+
         return cls(
             provider=provider,
             fallback=fallback,
@@ -132,4 +161,14 @@ class AISettings:
             analysis_overlap_segments=int(read("ANALYSIS_OVERLAP_SEGMENTS") or cls.analysis_overlap_segments),
             analysis_parallel_threshold=int(read("ANALYSIS_PARALLEL_THRESHOLD") or cls.analysis_parallel_threshold),
             analysis_parallel_threshold_characters=int(read("ANALYSIS_PARALLEL_THRESHOLD_CHARACTERS") or cls.analysis_parallel_threshold_characters),
+            analysis_map_thinking_level=(read("ANALYSIS_MAP_THINKING_LEVEL") or cls.analysis_map_thinking_level).lower(),
+            analysis_reduce_thinking_level=(read("ANALYSIS_REDUCE_THINKING_LEVEL") or cls.analysis_reduce_thinking_level).lower(),
+            analysis_map_timeout_seconds=int(read("ANALYSIS_MAP_TIMEOUT_SECONDS") or cls.analysis_map_timeout_seconds),
+            analysis_reduce_timeout_seconds=int(read("ANALYSIS_REDUCE_TIMEOUT_SECONDS") or cls.analysis_reduce_timeout_seconds),
+            analysis_map_max_retries=int(read("ANALYSIS_MAP_MAX_RETRIES") or cls.analysis_map_max_retries),
+            analysis_reduce_max_retries=int(read("ANALYSIS_REDUCE_MAX_RETRIES") or cls.analysis_reduce_max_retries),
+            analysis_retry_base_delay_seconds=int(read("ANALYSIS_RETRY_BASE_DELAY_SECONDS") or cls.analysis_retry_base_delay_seconds),
+            analysis_retry_max_delay_seconds=int(read("ANALYSIS_RETRY_MAX_DELAY_SECONDS") or cls.analysis_retry_max_delay_seconds),
+            analysis_cache_enabled=cache_enabled in {"true", "1"},
+            analysis_cache_dir=cache_dir,
         )
