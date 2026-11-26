@@ -2,7 +2,7 @@
 
 import json
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from time import perf_counter
 from typing import Any
@@ -10,6 +10,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from ai.config import AISettings
+from ai.analysis_recovery import PartialAnalysisCache, transient_retry
 from ai.providers.gemini import GeminiProcessingError, GeminiStructuredGenerator
 from core.models import ProcessedTranscript
 
@@ -169,51 +170,85 @@ def _reduce_prompt(transcript: ProcessedTranscript, chunks: tuple[Chunk, ...],
 
 
 def analyze_parallel(transcript: ProcessedTranscript, chunks: tuple[Chunk, ...],
-                     settings: AISettings, generator: GeminiStructuredGenerator,
-                     output_schema: type[BaseModel], gemini_client: Any = None) -> BaseModel:
-    """제한된 병렬 Map + 단일 Global Reduce. 불완전한 결과를 성공으로 반환하지 않습니다."""
+                     settings: AISettings, output_schema: type[BaseModel],
+                     gemini_client: Any = None) -> BaseModel:
+    """Map 결과를 독립적으로 저장하고 Reduce만 별도로 복구합니다."""
     started = perf_counter()
-    logger.info("Gemini 병렬 분석 시작 — %d개 구간, 동시 요청 %d",
-                len(chunks), settings.analysis_concurrency)
+    cache = PartialAnalysisCache(settings, transcript.model_dump_json())
+    logger.info("Gemini 병렬 분석 시작 — %d개 구간, 동시 요청 %d, Map=%s, Reduce=%s",
+                len(chunks), settings.analysis_concurrency,
+                settings.analysis_map_thinking_level, settings.analysis_reduce_thinking_level)
 
     def run(chunk: Chunk) -> _PartialAnalysis:
         begin = perf_counter()
-        # 실제 SDK 클라이언트는 Map 요청별로 생성·종료합니다.
+        stage = f"Map [{chunk.start}, {chunk.end})"
+        prompt = _map_prompt(transcript, chunk)
+        path = cache.path(prompt, _PartialAnalysis)
+        cached = cache.load(path, _PartialAnalysis, lambda result: _validate_map(result, chunk))
+        if cached is not None:
+            logger.info("Gemini %s 캐시 재사용 — %.3f초", stage, perf_counter() - begin)
+            return cached
+        logger.info("Gemini %s 시작 — %d자, timeout=%d초", stage, len(prompt),
+                    settings.analysis_map_timeout_seconds)
         worker = GeminiStructuredGenerator(
             settings.gemini_api_key, settings.gemini_model, gemini_client,
-            thinking_level=settings.analysis_thinking_level,
-            timeout_seconds=settings.gemini_timeout_seconds,
+            thinking_level=settings.analysis_map_thinking_level,
+            timeout_seconds=settings.analysis_map_timeout_seconds,
+            disable_sdk_retries=True,
         )
         try:
-            result = worker.generate(_map_prompt(transcript, chunk), _PartialAnalysis,
-                                     omit_array_bounds=True)
+            result = transient_retry(
+                lambda: worker.generate(prompt, _PartialAnalysis, omit_array_bounds=True),
+                stage=stage, retries=settings.analysis_map_max_retries, settings=settings,
+            )
             _validate_map(result, chunk)
-            logger.info("Gemini Map 완료 — [%d, %d), %.3f초",
-                        chunk.start, chunk.end, perf_counter() - begin)
+            cache.save(path, result)
+            logger.info("Gemini %s 완료 — %.3f초", stage, perf_counter() - begin)
             return result
+        except (GeminiProcessingError, ValueError) as exc:
+            logger.warning("Gemini %s 최종 실패 — %s, %.3f초",
+                           stage, type(exc).__name__, perf_counter() - begin)
+            raise
         finally:
             worker.close()
 
-    # map 순서는 원래 자막 순서로 유지됩니다. 실패 시 부분 결과를 사용하지 않습니다.
+    # 완료 순으로 실패를 확인하되, 결과는 원래 자막 순서로 복원합니다.
+    results = {}
     with ThreadPoolExecutor(max_workers=settings.analysis_concurrency) as pool:
-        futures = [pool.submit(run, chunk) for chunk in chunks]
+        futures = {pool.submit(run, chunk): index for index, chunk in enumerate(chunks)}
         try:
-            partials = [future.result() for future in futures]
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
         except BaseException:
             for future in futures:
                 future.cancel()
             raise
+    partials = [results[index] for index in range(len(chunks))]
 
     logger.info("Gemini Map 전체 완료 — %.3f초", perf_counter() - started)
     reduce_started = perf_counter()
     prompt, allowed = _reduce_prompt(transcript, chunks, partials)
-    result = generator.generate(prompt, output_schema, omit_array_bounds=True)
-    for topic in result.topics:
-        ids = topic.processed_segment_ids
-        if len(ids) != len(set(ids)) or not set(ids).issubset(allowed):
-            raise GeminiProcessingError("최종 분석이 근거에 없는 자막 또는 중복 ID를 참조합니다.")
-    if not result.summary.strip():
-        raise GeminiProcessingError("최종 분석 요약이 비어 있습니다.")
-    logger.info("Gemini Reduce 완료 — %.3f초 / 병렬 분석 전체 %.3f초",
-                perf_counter() - reduce_started, perf_counter() - started)
-    return result
+    logger.info("Gemini Reduce 시작 — %d자, timeout=%d초", len(prompt),
+                settings.analysis_reduce_timeout_seconds)
+    reducer = GeminiStructuredGenerator(
+        settings.gemini_api_key, settings.gemini_model, gemini_client,
+        thinking_level=settings.analysis_reduce_thinking_level,
+        timeout_seconds=settings.analysis_reduce_timeout_seconds,
+        disable_sdk_retries=True,
+    )
+    try:
+        result = transient_retry(
+            lambda: reducer.generate(prompt, output_schema, omit_array_bounds=True),
+            stage="Reduce", retries=settings.analysis_reduce_max_retries, settings=settings,
+        )
+        for topic in result.topics:
+            ids = topic.processed_segment_ids
+            if len(ids) != len(set(ids)) or not set(ids).issubset(allowed):
+                raise GeminiProcessingError("최종 분석이 근거에 없는 자막 또는 중복 ID를 참조합니다.")
+        if not result.summary.strip():
+            raise GeminiProcessingError("최종 분석 요약이 비어 있습니다.")
+        logger.info("Gemini Reduce 완료 — %.3f초 / 병렬 분석 전체 %.3f초",
+                    perf_counter() - reduce_started, perf_counter() - started)
+        return result
+    finally:
+        reducer.close()
