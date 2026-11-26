@@ -349,7 +349,8 @@ class GeminiStructuredGenerator:
     MAX_PROMPT_CHARS = 80000
 
     def __init__(self, api_key: str | None, model: str, client: Any | None = None,
-                 *, thinking_level: str = "default", timeout_seconds: int = 300):
+                 *, thinking_level: str = "default", timeout_seconds: int = 300,
+                 disable_sdk_retries: bool = False):
         self.model = model
         self.thinking_level = thinking_level
         self._owns_client = client is None
@@ -368,7 +369,10 @@ class GeminiStructuredGenerator:
                 "Gemini SDK가 없습니다. 'python -m pip install google-genai'를 실행하세요.",
             ) from exc
 
-        self.client = genai.Client(api_key=api_key, http_options={"timeout": timeout_seconds * 1000})
+        http_options = {"timeout": timeout_seconds * 1000}
+        if disable_sdk_retries:
+            http_options["retry_options"] = {"attempts": 1}
+        self.client = genai.Client(api_key=api_key, http_options=http_options)
 
     def close(self) -> None:
         if self._owns_client:
@@ -403,4 +407,7 @@ class GeminiStructuredGenerator:
             return schema.model_validate_json(text)
         except Exception as exc:
             # 오류 응답에 자막, 모델 출력, API 인증 정보가 담길 수 있으므로 상세 문자열을 노출하지 않습니다.
-            raise GeminiProcessingError("Gemini 구조화 응답 생성 또는 검증에 실패했습니다.") from exc
+            raise GeminiProcessingError(
+                "Gemini 구조화 응답 생성 또는 검증에 실패했습니다.",
+                retryable=GeminiTranscriptRefiner._is_retryable(exc),
+            ) from exc
