@@ -66,6 +66,12 @@ class SubtitleStyle(str, Enum):
     BOX = "box"                             # 배경 박스가 있는 자막
 
 
+class ShortsTemplate(str, Enum):
+    """세로 쇼츠 템플릿."""
+    BLACK = "black"                         # 검정 배경, 흰색·노란색 제목
+    WHITE = "white"                         # 흰 배경, 검정·빨간색 제목
+
+
 class Project(ContractModel):
     """하나의 편집 작업. 여러 원본 영상 ID를 같은 프로젝트로 묶습니다."""
 
@@ -330,6 +336,8 @@ class EditPlan(ContractModel):
     subtitles: tuple[PlanSubtitle, ...] | None = Field(
         default=None, description="사용자 편집 자막(결과 영상 기준). None이면 Whisper 자막 사용"
     )
+    shorts_template: ShortsTemplate | None = Field(default=None, description="세로 쇼츠 템플릿. None이면 기존 가로 영상")
+    title_lines: tuple[str, ...] = Field(default=(), max_length=2, description="쇼츠 상단 제목(최대 2줄, 줄당 20자)")
     edit_mode: EditMode = EditMode.PRESERVE_ORDER
     created_at: datetime = Field(default_factory=utc_now)
     approved_at: datetime | None = None
@@ -347,6 +355,8 @@ class EditPlan(ContractModel):
                 raise ValueError("cannot approve an empty plan")
         elif self.approved_at is not None:
             raise ValueError("draft plan cannot have approved_at")
+        if any(not line.strip() or len(line) > 20 for line in self.title_lines):
+            raise ValueError("title lines must be 1-20 characters")
         if self.subtitles:
             total_ms = sum(clip.end_ms - clip.start_ms for clip in self.clips)
             if any(subtitle.end_ms > total_ms for subtitle in self.subtitles):
