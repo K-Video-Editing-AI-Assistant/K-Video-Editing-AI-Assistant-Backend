@@ -5,9 +5,11 @@
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -15,14 +17,33 @@ from dotenv import dotenv_values
 from core.errors import AppError, ErrorCode
 from core.interfaces import VideoEditor
 from core.models import (
-    ApprovedEditPlan, PlanClip, PlanSubtitle, RenderResult, SubtitleStyle, Transcript,
-    VideoAsset, new_id,
+    ApprovedEditPlan, PlanClip, PlanSubtitle, RenderResult, ShortsTemplate, SubtitleStyle,
+    Transcript, VideoAsset, new_id,
 )
 from processing.files import probe_video
 
-WIDTH, HEIGHT = 640, 360
-
 SubtitleEvent = tuple[int, int, str]
+
+TITLE_FONT = Path(__file__).resolve().parent / "fonts" / "BlackHanSans-Regular.ttf"
+
+
+@dataclass(frozen=True)
+class Layout:
+    width: int
+    height: int
+    scale: float
+    margin_v: int
+
+
+LANDSCAPE = Layout(640, 360, 1.0, 18)
+SHORTS = Layout(720, 1280, 2.2, 1280 - (1280 + 720 * 9 // 16) // 2 + 22)
+
+_TEMPLATES = {
+    ShortsTemplate.BLACK: dict(bg="0x000000", title=("0xFFFFFF", "0xFFE500")),
+    ShortsTemplate.WHITE: dict(bg="0xFFFFFF", title=("0x000000", "0xE61E1E")),
+}
+_TITLE_SIZE = 58
+_TITLE_Y = (270, 340)
 
 _STYLES = {
     SubtitleStyle.BASIC: dict(size=20, bold=0, border=1, outline=1.5, text_color="&H00FFFFFF",
@@ -64,21 +85,25 @@ def _slice(items, start_ms: int, end_ms: int) -> list[SubtitleEvent]:
     return events
 
 
-def build_ass(events: list[SubtitleEvent], style: SubtitleStyle, font: str) -> str:
+def build_ass(
+    events: list[SubtitleEvent], style: SubtitleStyle, font: str, layout: Layout = LANDSCAPE,
+) -> str:
     s = _STYLES[style]
+    size = round(s["size"] * layout.scale)
+    outline = f"{s['outline'] * layout.scale:g}"
     lines = [
         "[Script Info]",
         "ScriptType: v4.00+",
-        f"PlayResX: {WIDTH}",
-        f"PlayResY: {HEIGHT}",
+        f"PlayResX: {layout.width}",
+        f"PlayResY: {layout.height}",
         "WrapStyle: 0",
         "ScaledBorderAndShadow: yes",
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV",
-        f"Style: Default,{font},{s['size']},{s['text_color']},{s['outline_color']},{s['back_color']},"
-        f"{s['bold']},{s['border']},{s['outline']},0,2,20,20,18",
+        f"Style: Default,{font},{size},{s['text_color']},{s['outline_color']},{s['back_color']},"
+        f"{s['bold']},{s['border']},{outline},0,2,20,20,{layout.margin_v}",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
@@ -120,12 +145,22 @@ def _default_fonts_dir() -> Path | None:
     return None
 
 
+def title_filters(template: ShortsTemplate, title_lines: tuple[str, ...]) -> list[str]:
+    colors = _TEMPLATES[template]["title"]
+    bg = _TEMPLATES[template]["bg"]
+    return [
+        f"drawtext=fontfile=title.ttf:textfile=title_{i}.txt:expansion=none:fontsize={_TITLE_SIZE}"
+        f":fontcolor={colors[i]}:borderw=2:bordercolor={bg}:x=(w-text_w)/2:y={_TITLE_Y[i]}"
+        for i in range(len(title_lines))
+    ]
+
+
 def _filter_path(path: Path) -> str:
     return "'" + path.as_posix().replace(":", "\\:") + "'"
 
 
 class FFmpegVideoEditor(VideoEditor):
-    VERSION = "ffmpeg-editor-subtitle-v3"
+    VERSION = "ffmpeg-editor-shorts-v1"
 
     def __init__(self, font: str | None = None, fonts_dir: Path | None = None) -> None:
         self.font = font or _default_font()
@@ -145,24 +180,35 @@ class FFmpegVideoEditor(VideoEditor):
             events_by_clip = [
                 subtitle_events(clip, transcript_by_video.get(clip.video_id)) for clip in plan.clips
             ]
+        template = plan.shorts_template
+        layout = SHORTS if template is not None else LANDSCAPE
+        background = _TEMPLATES[template]["bg"] if template is not None else "0x000000"
         output_path = Path(output_path).resolve()
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix="ai-video-assistant-render-") as tmp:
             folder = Path(tmp)
+            titles: list[str] = []
+            if template is not None and plan.title_lines:
+                shutil.copyfile(TITLE_FONT, folder / "title.ttf")
+                for i, line in enumerate(plan.title_lines):
+                    (folder / f"title_{i}.txt").write_text(line.strip(), encoding="utf-8")
+                titles = title_filters(template, plan.title_lines)
             pieces = []
             for index, clip in enumerate(plan.clips):
                 video = by_id[clip.video_id]
                 if clip.end_ms > video.duration_ms:
                     raise AppError(ErrorCode.INVALID_PLAN, "클립 시간이 원본 영상을 초과합니다.")
-                video_filter = (
-                    f"scale={WIDTH}:{HEIGHT}:force_original_aspect_ratio=decrease,"
-                    f"pad={WIDTH}:{HEIGHT}:(ow-iw)/2:(oh-ih)/2,fps=30,format=yuv420p"
-                )
+                w, h = layout.width, layout.height
+                video_filter = ",".join([
+                    f"scale={w}:{h}:force_original_aspect_ratio=decrease",
+                    f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:color={background}",
+                    "fps=30", "format=yuv420p", *titles,
+                ])
                 events = events_by_clip[index]
                 if events:
                     subtitle_name = f"sub_{index:04d}.ass"
                     (folder / subtitle_name).write_text(
-                        build_ass(events, plan.subtitle_style, self.font), encoding="utf-8"
+                        build_ass(events, plan.subtitle_style, self.font, layout), encoding="utf-8"
                     )
                     video_filter += f",ass={subtitle_name}"
                     if self.fonts_dir is not None:
